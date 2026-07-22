@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>ĐiệnTrack — Xuất/Thu hồi hàng</title>
+<meta name="theme-color" content="#12356B">
+<meta name="description" content="Ghi nhận xuất hàng và thu hồi hàng tại công trình chỉ trong vài giây.">
+
+<!-- PWA manifest được tạo động trong app.js (tránh lỗi encode data-URI) -->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============ LOGIN SCREEN ============ -->
+<section id="screen-login" class="screen screen-login is-active">
+  <div class="login-hero">
+    <div class="login-mark" aria-hidden="true">
+      <svg viewBox="0 0 64 64" width="56" height="56"><path d="M35 4 12 36h14l-5 24 27-34H34l5-22z" fill="currentColor"/></svg>
+    </div>
+    <h1>ĐiệnTrack</h1>
+    <p>Ghi nhận xuất &amp; thu hồi vật tư ngay tại công trình — chỉ vài giây.</p>
+  </div>
+  <div class="login-card">
+    <button id="btn-google-login" class="btn btn-google">
+      <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l6-6C34 5.1 29.3 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21 21-9.4 21-21c0-1.3-.1-2.7-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.6 15.7 18.9 13 24 13c3.1 0 5.8 1.1 8 3l6-6C34 5.1 29.3 3 24 3c-7.6 0-14.2 4.3-17.7 10.7z"/><path fill="#4CAF50" d="M24 45c5.2 0 9.9-2 13.4-5.2l-6.2-5.2c-2 1.4-4.6 2.3-7.2 2.3-5.2 0-9.6-3.3-11.2-8l-6.5 5C9.7 40.6 16.3 45 24 45z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C40.9 36 44 30.6 44 24c0-1.3-.1-2.7-.4-3.5z"/></svg>
+      Đăng nhập bằng Google
+    </button>
+    <p class="login-hint">Dùng email công ty để đăng nhập</p>
+  </div>
+</section>
+
+<!-- ============ APP SHELL ============ -->
+<div id="app-shell" class="app-shell">
+
+  <header class="topbar">
+    <button id="btn-back" class="icon-btn is-hidden" aria-label="Quay lại">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <h2 id="topbar-title">Bảng điều khiển</h2>
+    <button id="btn-profile" class="avatar-btn" aria-label="Hồ sơ">
+      <span id="avatar-initial">?</span>
+    </button>
+  </header>
+
+  <main id="main-content">
+
+    <!-- ---- DASHBOARD ---- -->
+    <section id="screen-dashboard" class="screen is-active">
+      <div class="stat-row">
+        <div class="stat-card stat-xuat">
+          <span class="stat-label">Tổng lượt xuất</span>
+          <span class="stat-value" id="stat-xuat">0</span>
+        </div>
+        <div class="stat-card stat-thuhoi">
+          <span class="stat-label">Tổng lượt thu hồi</span>
+          <span class="stat-value" id="stat-thuhoi">0</span>
+        </div>
+      </div>
+
+      <div class="section-head">
+        <h3>Dự án gần đây</h3>
+        <button class="link-btn" data-nav="projects">Xem tất cả</button>
+      </div>
+      <div id="dashboard-projects" class="project-list"></div>
+
+      <div class="section-head">
+        <h3>Hoạt động gần đây</h3>
+      </div>
+      <div id="dashboard-recent" class="txn-list"></div>
+    </section>
+
+    <!-- ---- PROJECT LIST ---- -->
+    <section id="screen-projects" class="screen">
+      <div class="search-bar">
+        <input id="project-search" type="text" placeholder="Tìm dự án theo tên, khách hàng...">
+      </div>
+      <div id="project-list-full" class="project-list"></div>
+      <button id="btn-add-project" class="btn btn-outline btn-block">+ Tạo dự án mới</button>
+    </section>
+
+    <!-- ---- PROJECT DETAIL ---- -->
+    <section id="screen-project-detail" class="screen">
+      <div class="project-header-card">
+        <h3 id="pd-name">—</h3>
+        <p id="pd-meta">—</p>
+        <div class="chip-row">
+          <button class="chip" id="pd-edit">Sửa dự án</button>
+          <button class="chip chip-danger" id="pd-delete">Xóa dự án</button>
+        </div>
+      </div>
+
+      <div class="filter-bar">
+        <select id="filter-type">
+          <option value="">Tất cả loại</option>
+          <option value="Xuất">Xuất hàng</option>
+          <option value="ThuHoi">Thu hồi</option>
+        </select>
+        <input type="date" id="filter-date">
+        <input type="text" id="pd-search" placeholder="Tìm tên/mã hàng, ghi chú">
+      </div>
+
+      <div id="pd-txn-list" class="txn-list"></div>
+      <div class="pagination">
+        <button id="pd-prev" class="chip">‹ Trước</button>
+        <span id="pd-page-info">Trang 1</span>
+        <button id="pd-next" class="chip">Sau ›</button>
+      </div>
+    </section>
+
+    <!-- ---- SEARCH ---- -->
+    <section id="screen-search" class="screen">
+      <div class="search-bar">
+        <input id="global-search" type="text" placeholder="Tìm theo tên hàng, mã hàng, ghi chú...">
+      </div>
+      <div id="global-search-results" class="txn-list"></div>
+    </section>
+
+    <!-- ---- PROFILE ---- -->
+    <section id="screen-profile" class="screen">
+      <div class="profile-card">
+        <div class="profile-avatar" id="profile-avatar">?</div>
+        <h3 id="profile-name">—</h3>
+        <p id="profile-email">—</p>
+        <span class="role-badge" id="profile-role">Viewer</span>
+      </div>
+      <button class="chip chip-block" data-nav="users">Quản lý người dùng</button>
+      <button id="btn-logout" class="btn btn-outline btn-block">Đăng xuất</button>
+    </section>
+
+    <!-- ---- USERS ---- -->
+    <section id="screen-users" class="screen">
+      <div id="users-list" class="project-list"></div>
+    </section>
+
+  </main>
+
+  <!-- ============ BOTTOM NAV ============ -->
+  <nav class="bottom-nav">
+    <button class="nav-item is-active" data-nav="dashboard">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M4 12 12 4l8 8M6 10v9h5v-5h2v5h5v-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Trang chủ</span>
+    </button>
+    <button class="nav-item" data-nav="projects">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="15" rx="1.5" stroke="currentColor" stroke-width="2"/><path d="M4 9.5h16" stroke="currentColor" stroke-width="2"/></svg>
+      <span>Dự án</span>
+    </button>
+    <button class="nav-item nav-fab" id="btn-fab" aria-label="Thêm giao dịch">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>
+    </button>
+    <button class="nav-item" data-nav="search">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="2"/><path d="m20 20-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>Tìm kiếm</span>
+    </button>
+    <button class="nav-item" data-nav="profile">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.5" stroke="currentColor" stroke-width="2"/><path d="M5 20c1.3-4 4.2-6 7-6s5.7 2 7 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>Hồ sơ</span>
+    </button>
+  </nav>
+
+</div>
+
+<!-- ============ FAB CHOICE SHEET ============ -->
+<div id="sheet-overlay" class="sheet-overlay">
+  <div class="sheet" id="fab-sheet">
+    <div class="sheet-handle"></div>
+    <h3>Ghi nhận giao dịch</h3>
+    <button class="type-choice type-xuat" data-type="Xuất">
+      <span class="type-icon">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M12 19V5M6 11l6-6 6 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="type-text">
+        <strong>Xuất hàng</strong>
+        <small>Vật tư mang ra khỏi kho</small>
+      </span>
+    </button>
+    <button class="type-choice type-thuhoi" data-type="ThuHoi">
+      <span class="type-icon">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M6 13l6 6 6-6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="type-text">
+        <strong>Thu hồi hàng</strong>
+        <small>Vật tư mang về lại kho</small>
+      </span>
+    </button>
+    <button class="sheet-cancel" data-close-sheet>Hủy</button>
+  </div>
+</div>
+
+<!-- ============ ADD/EDIT TRANSACTION SHEET ============ -->
+<div id="txn-overlay" class="sheet-overlay">
+  <div class="sheet sheet-tall" id="txn-sheet">
+    <div class="sheet-handle"></div>
+    <h3 id="txn-sheet-title">Xuất hàng</h3>
+
+    <div class="field">
+      <label>Dự án</label>
+      <select id="txn-project"></select>
+    </div>
+
+    <button id="btn-ocr" class="btn btn-ai btn-block">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 8V5a1 1 0 0 1 1-1h3M20 8V5a1 1 0 0 0-1-1h-3M4 16v3a1 1 0 0 0 1 1h3M20 16v3a1 1 0 0 1-1 1h-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/></svg>
+      Chụp ảnh, AI tự điền
+    </button>
+    <input type="file" id="ocr-input" accept="image/*" capture="environment" class="is-hidden">
+    <p id="ocr-status" class="ocr-status is-hidden"></p>
+
+    <div class="field">
+      <label>Tên hàng *</label>
+      <input id="txn-itemname" type="text" placeholder="VD: Dây điện CADIVI 2.5mm">
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Mã hàng</label>
+        <input id="txn-itemcode" type="text" placeholder="VD: DC-2.5">
+      </div>
+      <div class="field">
+        <label>Số lượng *</label>
+        <input id="txn-qty" type="number" inputmode="decimal" placeholder="0">
+      </div>
+    </div>
+    <div class="field">
+      <label>Ghi chú</label>
+      <textarea id="txn-note" rows="2" placeholder="Ghi chú thêm (tùy chọn)"></textarea>
+    </div>
+
+    <div class="field">
+      <label>Ảnh</label>
+      <div class="photo-row">
+        <label class="photo-add" for="txn-photo-input">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.2" stroke="currentColor" stroke-width="2"/></svg>
+          <span>Thêm ảnh</span>
+        </label>
+        <input type="file" id="txn-photo-input" accept="image/*" capture="environment" class="is-hidden">
+        <img id="txn-photo-preview" class="photo-preview is-hidden">
+      </div>
+    </div>
+
+    <div class="sheet-actions">
+      <button class="btn btn-outline" data-close-txn>Hủy</button>
+      <button class="btn btn-primary" id="btn-save-txn">Lưu</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PROJECT FORM SHEET ============ -->
+<div id="project-overlay" class="sheet-overlay">
+  <div class="sheet" id="project-sheet">
+    <div class="sheet-handle"></div>
+    <h3 id="project-sheet-title">Tạo dự án mới</h3>
+    <div class="field">
+      <label>Tên dự án *</label>
+      <input id="prj-name" type="text" placeholder="VD: Nhà anh Tuấn - Q7">
+    </div>
+    <div class="field">
+      <label>Khách hàng</label>
+      <input id="prj-customer" type="text" placeholder="Tên khách hàng">
+    </div>
+    <div class="field">
+      <label>Địa chỉ</label>
+      <input id="prj-address" type="text" placeholder="Địa chỉ công trình">
+    </div>
+    <div class="field">
+      <label>Trạng thái</label>
+      <select id="prj-status">
+        <option>Đang thi công</option>
+        <option>Tạm dừng</option>
+        <option>Hoàn thành</option>
+      </select>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn btn-outline" data-close-project>Hủy</button>
+      <button class="btn btn-primary" id="btn-save-project">Lưu dự án</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ IMAGE VIEWER ============ -->
+<div id="image-viewer" class="image-viewer">
+  <button id="image-viewer-close" class="icon-btn image-viewer-close" aria-label="Đóng">
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+  </button>
+  <img id="image-viewer-img" src="">
+</div>
+
+<!-- ============ TOAST ============ -->
+<div id="toast" class="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
