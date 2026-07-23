@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-<title>ĐiệnTrack — Xuất/Thu hồi hàng</title>
+<title>ĐiệnTrack — VTD Smarthome</title>
 <meta name="theme-color" content="#12356B">
 <meta name="description" content="Ghi nhận xuất hàng và thu hồi hàng tại công trình chỉ trong vài giây.">
 
@@ -23,6 +23,7 @@
       <svg viewBox="0 0 64 64" width="56" height="56"><path d="M35 4 12 36h14l-5 24 27-34H34l5-22z" fill="currentColor"/></svg>
     </div>
     <h1>ĐiệnTrack</h1>
+    <p class="brand-line">VTD Smarthome</p>
     <p>Ghi nhận xuất &amp; thu hồi vật tư ngay tại công trình — chỉ vài giây.</p>
   </div>
   <div class="login-card">
@@ -51,17 +52,6 @@
 
     <!-- ---- DASHBOARD ---- -->
     <section id="screen-dashboard" class="screen is-active">
-      <div class="stat-row">
-        <div class="stat-card stat-xuat">
-          <span class="stat-label">Tổng lượt xuất</span>
-          <span class="stat-value" id="stat-xuat">0</span>
-        </div>
-        <div class="stat-card stat-thuhoi">
-          <span class="stat-label">Tổng lượt thu hồi</span>
-          <span class="stat-value" id="stat-thuhoi">0</span>
-        </div>
-      </div>
-
       <div class="section-head">
         <h3>Dự án gần đây</h3>
         <button class="link-btn" data-nav="projects">Xem tất cả</button>
@@ -112,12 +102,13 @@
       </div>
     </section>
 
-    <!-- ---- SEARCH ---- -->
+    <!-- ---- SEARCH (chỉ xem, không sửa/xóa được ở đây) ---- -->
     <section id="screen-search" class="screen">
       <div class="search-bar">
         <input id="global-search" type="text" placeholder="Tìm theo tên hàng, mã hàng, ghi chú...">
       </div>
-      <div id="global-search-results" class="txn-list"></div>
+      <p class="screen-note">Kết quả chỉ để xem và đối chiếu số lượng giữa các dự án. Vào đúng dự án để thêm/sửa/xóa.</p>
+      <div id="global-search-results" class="search-group-list"></div>
     </section>
 
     <!-- ---- PROFILE ---- -->
@@ -128,13 +119,21 @@
         <p id="profile-email">—</p>
         <span class="role-badge" id="profile-role">Viewer</span>
       </div>
-      <button class="chip chip-block" data-nav="users">Quản lý người dùng</button>
+      <button class="chip chip-block" data-nav="users">Quản lý người dùng &amp; phân quyền</button>
+      <button class="chip chip-block" data-nav="trash">Thùng rác / Khôi phục dữ liệu</button>
       <button id="btn-logout" class="btn btn-outline btn-block">Đăng xuất</button>
     </section>
 
     <!-- ---- USERS ---- -->
     <section id="screen-users" class="screen">
+      <p class="screen-note">Chỉ Admin sửa được mục này. Ủy quyền cho phép tài khoản đó sửa/xóa dự án và giao dịch do người khác tạo.</p>
       <div id="users-list" class="project-list"></div>
+    </section>
+
+    <!-- ---- TRASH / BACKUP ---- -->
+    <section id="screen-trash" class="screen">
+      <p class="screen-note">Toàn bộ dự án/giao dịch đã xóa được sao lưu tại đây. Chỉ Admin mới khôi phục được — dùng khi lỡ xóa nhầm.</p>
+      <div id="trash-list" class="project-list"></div>
     </section>
 
   </main>
@@ -243,6 +242,35 @@
     <div class="sheet-actions">
       <button class="btn btn-outline" data-close-txn>Hủy</button>
       <button class="btn btn-primary" id="btn-save-txn">Lưu</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ TXN ACTION SHEET (xem/sửa/xóa 1 giao dịch, thay cho prompt) ============ -->
+<div id="txn-action-overlay" class="sheet-overlay">
+  <div class="sheet" id="txn-action-sheet">
+    <div class="sheet-handle"></div>
+    <h3>Chi tiết giao dịch</h3>
+    <div id="txn-action-body" class="txn-action-body"></div>
+    <div class="txn-action-buttons" id="txn-action-buttons"></div>
+    <button class="sheet-cancel" data-close-txn-action>Đóng</button>
+  </div>
+</div>
+
+<!-- ============ PASSWORD CONFIRM SHEET (bắt buộc khi sửa/xóa) ============ -->
+<div id="password-overlay" class="sheet-overlay">
+  <div class="sheet" id="password-sheet">
+    <div class="sheet-handle"></div>
+    <h3 id="password-sheet-title">Xác nhận mật khẩu</h3>
+    <p class="screen-note" id="password-sheet-note">Thao tác này cần mật khẩu xác nhận để tránh xóa/sửa nhầm.</p>
+    <div class="field">
+      <label>Mật khẩu</label>
+      <input id="password-input" type="password" placeholder="Nhập mật khẩu xác nhận">
+    </div>
+    <p id="password-error" class="password-error is-hidden">Sai mật khẩu, vui lòng thử lại.</p>
+    <div class="sheet-actions">
+      <button class="btn btn-outline" data-close-password>Hủy</button>
+      <button class="btn btn-primary" id="btn-confirm-password">Xác nhận</button>
     </div>
   </div>
 </div>

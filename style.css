@@ -97,6 +97,81 @@ input, select, textarea { font-family: inherit; }
   font-weight: 600; font-size: 16px;
 }
 .login-hint { margin-top: 14px; font-size: 13px; color: var(--color-text-soft); }
+.brand-line { display: block; margin-top: 6px; font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #FFC24D; opacity: .95; }
+
+.screen-note { font-size: 12.5px; color: var(--color-text-soft); margin-bottom: 14px; line-height: 1.5; }
+
+/* ---- User permission card ---- */
+.user-card { display: flex; flex-direction: column; gap: 10px; }
+.user-card-head { display: flex; align-items: center; gap: 10px; }
+.user-card-avatar { width: 38px; height: 38px; border-radius: 50%; background: var(--color-primary); color: #fff; font-weight: 700; font-size: 14px; display: flex; align-items: center; justify-content: center; flex: none; }
+.user-card-name { font-size: 14.5px; font-weight: 700; }
+.user-card-email { font-size: 12px; color: var(--color-text-soft); }
+.user-card-controls { display: flex; flex-direction: column; gap: 8px; }
+.user-role-select { min-height: 40px; border-radius: var(--radius-sm); border: 1.5px solid var(--color-border); background: var(--color-bg); padding: 0 10px; font-size: 13.5px; font-weight: 600; }
+.perm-toggle-row { display: flex; gap: 14px; flex-wrap: wrap; }
+.perm-toggle { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--color-text); }
+.perm-toggle input { width: 18px; height: 18px; }
+.user-save-btn { align-self: flex-start; min-height: 36px; padding: 0 16px; border-radius: var(--radius-pill); border: none; background: var(--color-accent); color: #fff; font-size: 12.5px; font-weight: 700; }
+
+/* ---- Backup/trash card ---- */
+.backup-card { display: flex; align-items: center; gap: 12px; }
+.backup-card .backup-body { flex: 1; min-width: 0; }
+.backup-card .backup-body strong { display: block; font-size: 14.5px; }
+.backup-card .backup-body span { font-size: 12px; color: var(--color-text-soft); }
+.backup-restore-btn { min-height: 38px; padding: 0 14px; border-radius: var(--radius-pill); border: none; background: var(--color-thuhoi); color: #fff; font-size: 12.5px; font-weight: 700; flex: none; }
+
+/* ---- Txn action sheet ---- */
+.txn-action-body { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 16px; }
+.txn-action-thumb { width: 84px; height: 84px; border-radius: var(--radius-md); object-fit: cover; flex: none; }
+.txn-action-info strong { display: block; font-size: 16px; margin-bottom: 4px; }
+.txn-action-info div { font-size: 13px; color: var(--color-text-soft); margin-top: 2px; }
+.txn-action-info code { font-family: var(--font-mono); background: var(--color-surface-2); padding: 1px 6px; border-radius: 6px; }
+.txn-action-buttons { display: flex; flex-direction: column; gap: 8px; margin-bottom: 6px; }
+.txn-action-buttons button { min-height: var(--tap); border-radius: var(--radius-md); border: none; font-weight: 700; font-size: 14.5px; }
+.txn-action-edit { background: var(--color-primary-light); color: var(--color-primary); }
+.txn-action-delete { background: #FBEAE7; color: var(--color-danger); }
+.txn-action-view { background: var(--color-surface-2); color: var(--color-text); }
+.no-permission-note { font-size: 12.5px; color: var(--color-text-soft); text-align: center; padding: 8px 0; }
+
+/* ---- Password confirm ---- */
+.password-error { font-size: 12.5px; color: var(--color-danger); margin: -6px 0 10px; font-weight: 600; }
+
+/* ---- Search grouped results ---- */
+.search-group-list { display: flex; flex-direction: column; gap: 10px; }
+.search-group-card { background: var(--color-surface); border-radius: var(--radius-md); padding: 14px; box-shadow: var(--shadow-1); }
+.search-group-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+.search-group-head strong { font-size: 15px; }
+.search-group-head code { font-family: var(--font-mono); background: var(--color-surface-2); padding: 1px 8px; border-radius: 6px; font-size: 12px; }
+.search-group-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-top: 1px solid var(--color-border); font-size: 13px; }
+.search-group-row:first-of-type { border-top: none; }
+.search-group-row .sg-project { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-group-row .sg-qty { font-family: var(--font-mono); font-weight: 700; font-size: 12.5px; white-space: nowrap; }
+.sg-qty.sg-xuat { color: var(--color-xuat); }
+.sg-qty.sg-thuhoi { color: var(--color-thuhoi); }
+.brand-line { display: block; margin-top: 6px; font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #FFC24D; opacity: .95; }
+
+.screen-note { font-size: 12.5px; color: var(--color-text-soft); margin-bottom: 14px; line-height: 1.5; }
+
+/* ---- User permission card ---- */
+.user-card { display: flex; flex-direction: column; gap: 10px; }
+.user-card-head { display: flex; align-items: center; gap: 10px; }
+.user-card-avatar { width: 38px; height: 38px; border-radius: 50%; background: var(--color-primary); color: #fff; font-weight: 700; font-size: 14px; display: flex; align-items: center; justify-content: center; flex: none; }
+.user-card-name { font-size: 14.5px; font-weight: 700; }
+.user-card-email { font-size: 12px; color: var(--color-text-soft); }
+.user-card-controls { display: flex; flex-direction: column; gap: 8px; }
+.user-role-select { min-height: 40px; border-radius: var(--radius-sm); border: 1.5px solid var(--color-border); background: var(--color-bg); padding: 0 10px; font-size: 13.5px; font-weight: 600; }
+.perm-toggle-row { display: flex; gap: 14px; flex-wrap: wrap; }
+.perm-toggle { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--color-text); }
+.perm-toggle input { width: 18px; height: 18px; }
+.user-save-btn { align-self: flex-start; min-height: 36px; padding: 0 16px; border-radius: var(--radius-pill); border: none; background: var(--color-accent); color: #fff; font-size: 12.5px; font-weight: 700; }
+
+/* ---- Backup/trash card ---- */
+.backup-card { display: flex; align-items: center; gap: 12px; }
+.backup-card .backup-body { flex: 1; min-width: 0; }
+.backup-card .backup-body strong { display: block; font-size: 14.5px; }
+.backup-card .backup-body span { font-size: 12px; color: var(--color-text-soft); }
+.backup-restore-btn { min-height: 38px; padding: 0 14px; border-radius: var(--radius-pill); border: none; background: var(--color-thuhoi); color: #fff; font-size: 12.5px; font-weight: 700; flex: none; }
 
 /* ============ TOP BAR ============ */
 .topbar {

@@ -11,8 +11,12 @@ const CONFIG = {
   // trong Google Cloud Console rồi dán key MỚI vào đây trước khi dùng thật.
   // Dùng cho tính năng OCR (AI đọc ảnh phiếu xuất) qua Gemini API.
   GEMINI_API_KEY: 'AIzaSyDUfmSJMUWq9RGiufzRXDcUekHqDhLtUP8',
-  GEMINI_MODEL: 'gemini-2.0-flash'
+  GEMINI_MODEL: 'gemini-2.0-flash',
+  CONFIRM_PASSWORD: 'changepassword123'
 };
+
+
+const LOCAL_USER_KEY = 'dientrack_vtd_user';
 
 /* ---------------- STATE ---------------- */
 const state = {
@@ -27,20 +31,24 @@ const state = {
   editingTxnId: null,
   pendingPhotoBase64: null,
   pendingPhotoMime: null,
+  activeTxnForAction: null,
+  pendingPasswordAction: null // callback chạy sau khi nhập đúng mật khẩu
 };
 
 /* ---------------- DEMO MODE (khi chưa cấu hình API_URL) ---------------- */
 const DEMO_MODE = CONFIG.API_URL.indexOf('DÁN_URL') === 0;
 const demoStore = {
   projects: [
-    { ProjectID: 'PRJ_demo1', ProjectName: 'Nhà anh Tuấn - Q7', Customer: 'Anh Tuấn', Address: '12 Nguyễn Lương Bằng, Q7', Status: 'Đang thi công', CreatedDate: new Date(), CreatedBy: 'demo@congty.vn' },
-    { ProjectID: 'PRJ_demo2', ProjectName: 'Villa Thảo Điền', Customer: 'Chị Hoa', Address: '45 Quốc Hương, TP.Thủ Đức', Status: 'Đang thi công', CreatedDate: new Date(), CreatedBy: 'demo@congty.vn' }
+    { ProjectID: 'PRJ_demo1', ProjectName: 'Nhà anh Tuấn - Q7', Customer: 'Anh Tuấn', Address: '12 Nguyễn Lương Bằng, Q7', Status: 'Đang thi công', CreatedDate: new Date(), CreatedBy: 'demo@vtdsmarthome.vn' },
+    { ProjectID: 'PRJ_demo2', ProjectName: 'Villa Thảo Điền', Customer: 'Chị Hoa', Address: '45 Quốc Hương, TP.Thủ Đức', Status: 'Đang thi công', CreatedDate: new Date(), CreatedBy: 'demo@vtdsmarthome.vn' }
   ],
   transactions: [
-    { TransactionID: 'TXN_demo1', ProjectID: 'PRJ_demo1', Type: 'Xuất', DateTime: new Date(), ItemName: 'Dây điện CADIVI 2.5mm', ItemCode: 'DC-2.5', Quantity: 50, Note: 'Xuất cho tầng 2', ImageURL: '', CreatedBy: 'demo@congty.vn', CreatedTime: new Date() },
-    { TransactionID: 'TXN_demo2', ProjectID: 'PRJ_demo1', Type: 'ThuHoi', DateTime: new Date(Date.now()-86400000), ItemName: 'Ổ cắm âm tường Panasonic', ItemCode: 'OC-PN01', Quantity: 4, Note: 'Thu hồi do đổi màu', ImageURL: '', CreatedBy: 'demo@congty.vn', CreatedTime: new Date() }
+    { TransactionID: 'TXN_demo1', ProjectID: 'PRJ_demo1', Type: 'Xuất', DateTime: new Date(), ItemName: 'Dây điện CADIVI 2.5mm', ItemCode: 'DC-2.5', Quantity: 50, Note: 'Xuất cho tầng 2', ImageURL: '', CreatedBy: 'demo@vtdsmarthome.vn', CreatedTime: new Date() },
+    { TransactionID: 'TXN_demo2', ProjectID: 'PRJ_demo1', Type: 'ThuHoi', DateTime: new Date(Date.now() - 86400000), ItemName: 'Ổ cắm âm tường Panasonic', ItemCode: 'OC-PN01', Quantity: 4, Note: 'Thu hồi do đổi màu', ImageURL: '', CreatedBy: 'demo@vtdsmarthome.vn', CreatedTime: new Date() },
+    { TransactionID: 'TXN_demo3', ProjectID: 'PRJ_demo2', Type: 'Xuất', DateTime: new Date(Date.now() - 3600000), ItemName: 'Dây điện CADIVI 2.5mm', ItemCode: 'DC-2.5', Quantity: 20, Note: '', ImageURL: '', CreatedBy: 'demo@vtdsmarthome.vn', CreatedTime: new Date() }
   ],
-  users: [{ Email: 'demo@congty.vn', Name: 'Người dùng Demo', Avatar: '', Role: 'Admin' }]
+  users: [{ Email: 'demo@vtdsmarthome.vn', Name: 'Người dùng Demo', Avatar: '', Role: 'Admin', Permissions: '' }],
+  backups: []
 };
 
 /* ---------------- API WRAPPER ---------------- */
@@ -63,6 +71,14 @@ async function api(action, params = {}) {
  *  khi chưa deploy Apps Script. Tự tắt khi bạn điền API_URL thật. */
 function demoApi(action, p) {
   const clone = (x) => JSON.parse(JSON.stringify(x));
+  const findUser = (email) => demoStore.users.find(u => u.Email === email);
+  const canModify = (ownerEmail, permKey) => {
+    const u = findUser(state.user.Email);
+    if (!u) return false;
+    if (u.Role === 'Admin') return true;
+    if (ownerEmail === state.user.Email) return true;
+    return String(u.Permissions || '').split(',').includes(permKey);
+  };
   switch (action) {
     case 'getBootstrap':
       return { ok: true, user: demoStore.users[0], projects: clone(demoStore.projects) };
@@ -74,12 +90,17 @@ function demoApi(action, p) {
     }
     case 'updateProject': {
       const it = demoStore.projects.find(x => x.ProjectID === p.ProjectID);
+      if (!canModify(it.CreatedBy, 'edit_all')) return { ok: false, error: 'Bạn không có quyền sửa dự án này' };
       Object.assign(it, p); return { ok: true, project: it };
     }
-    case 'deleteProject':
+    case 'deleteProject': {
+      const it = demoStore.projects.find(x => x.ProjectID === p.ProjectID);
+      if (!it) return { ok: false, error: 'Không tìm thấy dự án' };
+      if (!canModify(it.CreatedBy, 'delete_all')) return { ok: false, error: 'Bạn không có quyền xóa dự án này' };
+      demoStore.backups.unshift({ BackupID: 'BK_' + Date.now(), Table: 'Projects', RecordID: it.ProjectID, RecordData: JSON.stringify(it), DeletedBy: state.user.Email, DeletedTime: new Date(), Restored: 'N' });
       demoStore.projects = demoStore.projects.filter(x => x.ProjectID !== p.ProjectID);
-      demoStore.transactions = demoStore.transactions.filter(x => x.ProjectID !== p.ProjectID);
       return { ok: true };
+    }
     case 'listTransactions': {
       let items = demoStore.transactions.filter(t => t.ProjectID === p.ProjectID);
       if (p.Type) items = items.filter(t => t.Type === p.Type);
@@ -101,11 +122,18 @@ function demoApi(action, p) {
     }
     case 'updateTransaction': {
       const it = demoStore.transactions.find(x => x.TransactionID === p.TransactionID);
+      if (!it) return { ok: false, error: 'Không tìm thấy giao dịch' };
+      if (!canModify(it.CreatedBy, 'edit_all')) return { ok: false, error: 'Bạn không có quyền sửa giao dịch này' };
       Object.assign(it, p); return { ok: true, transaction: it };
     }
-    case 'deleteTransaction':
+    case 'deleteTransaction': {
+      const it = demoStore.transactions.find(x => x.TransactionID === p.TransactionID);
+      if (!it) return { ok: false, error: 'Không tìm thấy giao dịch' };
+      if (!canModify(it.CreatedBy, 'delete_all')) return { ok: false, error: 'Bạn không có quyền xóa giao dịch này' };
+      demoStore.backups.unshift({ BackupID: 'BK_' + Date.now(), Table: 'Transactions', RecordID: it.TransactionID, RecordData: JSON.stringify(it), DeletedBy: state.user.Email, DeletedTime: new Date(), Restored: 'N' });
       demoStore.transactions = demoStore.transactions.filter(x => x.TransactionID !== p.TransactionID);
       return { ok: true };
+    }
     case 'getStats': {
       let items = demoStore.transactions;
       if (p.ProjectID) items = items.filter(t => t.ProjectID === p.ProjectID);
@@ -113,6 +141,27 @@ function demoApi(action, p) {
     }
     case 'listUsers':
       return { ok: true, users: clone(demoStore.users) };
+    case 'setUserRole': {
+      const u = findUser(p.Email);
+      if (!u) return { ok: false, error: 'Không tìm thấy người dùng' };
+      if (p.Role !== undefined) u.Role = p.Role;
+      if (p.Permissions !== undefined) u.Permissions = p.Permissions;
+      return { ok: true, user: u };
+    }
+    case 'listBackups': {
+      let items = demoStore.backups.filter(b => String(b.Restored) !== 'Y');
+      if (p.Table) items = items.filter(b => b.Table === p.Table);
+      return { ok: true, items: clone(items) };
+    }
+    case 'restoreBackup': {
+      const b = demoStore.backups.find(x => x.BackupID === p.BackupID);
+      if (!b) return { ok: false, error: 'Không tìm thấy bản sao lưu' };
+      const record = JSON.parse(b.RecordData);
+      if (b.Table === 'Projects') demoStore.projects.unshift(record);
+      else demoStore.transactions.unshift(record);
+      b.Restored = 'Y';
+      return { ok: true };
+    }
     case 'uploadImage':
       return { ok: true, url: p._localPreviewUrl || '' };
     default:
@@ -129,7 +178,7 @@ function toast(msg) {
   t.textContent = msg;
   t.classList.add('is-active');
   clearTimeout(toast._timer);
-  toast._timer = setTimeout(() => t.classList.remove('is-active'), 2200);
+  toast._timer = setTimeout(() => t.classList.remove('is-active'), 2400);
 }
 
 function fmtDate(d) {
@@ -152,18 +201,64 @@ function fileToBase64(file) {
   });
 }
 
+function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function escapeAttr(s) { return escapeHtml(s); }
+
+function projectNameById(id) {
+  const p = state.projects.find(x => x.ProjectID === id);
+  return p ? p.ProjectName : '(dự án đã xóa)';
+}
+
+/** Kiểm tra quyền phía client (chỉ để ẩn/hiện UI cho gọn — quyền THẬT luôn được
+ *  backend Code.gs kiểm tra lại độc lập, nên dù can thiệp trình duyệt cũng không vượt qua được). */
+function hasPerm(ownerEmail, permKey) {
+  if (!state.user) return false;
+  if (state.user.Role === 'Admin') return true;
+  if (ownerEmail && ownerEmail === state.user.Email) return true;
+  const perms = String(state.user.Permissions || '').split(',').map(s => s.trim());
+  return perms.indexOf(permKey) !== -1;
+}
+
+/* ---------------- PASSWORD CONFIRM (bắt buộc trước khi Sửa/Xóa) ---------------- */
+function requirePasswordThen(title, note, onConfirmed) {
+  state.pendingPasswordAction = onConfirmed;
+  $('#password-sheet-title').textContent = title;
+  $('#password-sheet-note').textContent = note;
+  $('#password-input').value = '';
+  $('#password-error').classList.add('is-hidden');
+  $('#password-overlay').classList.add('is-active');
+  setTimeout(() => $('#password-input').focus(), 250);
+}
+$('[data-close-password]').addEventListener('click', () => { $('#password-overlay').classList.remove('is-active'); state.pendingPasswordAction = null; });
+$('#password-overlay').addEventListener('click', (e) => { if (e.target.id === 'password-overlay') { $('#password-overlay').classList.remove('is-active'); state.pendingPasswordAction = null; } });
+$('#btn-confirm-password').addEventListener('click', () => {
+  const val = $('#password-input').value;
+  if (val !== CONFIG.CONFIRM_PASSWORD) {
+    $('#password-error').classList.remove('is-hidden');
+    $('#password-input').value = '';
+    $('#password-input').focus();
+    return;
+  }
+  $('#password-overlay').classList.remove('is-active');
+  const cb = state.pendingPasswordAction;
+  state.pendingPasswordAction = null;
+  if (cb) cb();
+});
+$('#password-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btn-confirm-password').click(); });
+
 /* ---------------- NAVIGATION ---------------- */
 const TITLES = {
   dashboard: 'Bảng điều khiển', projects: 'Danh sách dự án', 'project-detail': 'Chi tiết dự án',
-  search: 'Tìm kiếm', profile: 'Hồ sơ', users: 'Quản lý người dùng'
+  search: 'Tìm kiếm', profile: 'Hồ sơ', users: 'Quản lý người dùng', trash: 'Thùng rác'
 };
+const TOP_LEVEL_SCREENS = ['dashboard', 'projects', 'search', 'profile'];
 
 function showScreen(name, { push = true, title } = {}) {
   $$('.screen').forEach(s => s.classList.remove('is-active'));
   $('#screen-' + name).classList.add('is-active');
   $('#topbar-title').textContent = title || TITLES[name] || '';
   $$('.nav-item[data-nav]').forEach(b => b.classList.toggle('is-active', b.dataset.nav === name));
-  $('#btn-back').classList.toggle('is-hidden', name === 'dashboard' || name === 'projects' || name === 'search' || name === 'profile');
+  $('#btn-back').classList.toggle('is-hidden', TOP_LEVEL_SCREENS.indexOf(name) !== -1);
   if (push) {
     if (state.screenStack[state.screenStack.length - 1] !== name) state.screenStack.push(name);
   }
@@ -171,6 +266,7 @@ function showScreen(name, { push = true, title } = {}) {
   if (name === 'dashboard') loadDashboard();
   if (name === 'projects') loadProjectList();
   if (name === 'users') loadUsers();
+  if (name === 'trash') loadTrash();
 }
 
 $('#btn-back').addEventListener('click', () => {
@@ -179,17 +275,25 @@ $('#btn-back').addEventListener('click', () => {
   showScreen(prev, { push: false });
 });
 
+// Nút trong thanh điều hướng dưới cùng
 $$('.nav-item[data-nav]').forEach(btn => {
   btn.addEventListener('click', () => {
     state.screenStack = [btn.dataset.nav];
     showScreen(btn.dataset.nav, { push: false });
   });
 });
+// Các nút điều hướng KHÁC nằm rải rác trong app (VD: chip trong Hồ sơ, "Xem tất cả" ở Dashboard)
+$$('[data-nav]:not(.nav-item)').forEach(btn => {
+  btn.addEventListener('click', () => {
+    state.screenStack.push(btn.dataset.nav);
+    showScreen(btn.dataset.nav, { push: false });
+  });
+});
 $('#btn-profile').addEventListener('click', () => { state.screenStack.push('profile'); showScreen('profile', { push: false }); });
 
-/* ---------------- LOGIN ---------------- */
-function completeLogin(email, name, picture) {
-  loadingToast('Đang tải dữ liệu...');
+/* ---------------- LOGIN (có lưu phiên đăng nhập) ---------------- */
+function completeLogin(email, name, picture, { remember = true } = {}) {
+  toast('Đang tải dữ liệu...');
   api('getBootstrap', { userEmail: email }).then(res => {
     if (!res.ok) { toast('Lỗi đăng nhập: ' + res.error); return; }
     state.user = Object.assign({ Name: name, Avatar: picture }, res.user);
@@ -199,17 +303,29 @@ function completeLogin(email, name, picture) {
     $('#avatar-initial').textContent = initials(state.user.Name || state.user.Email);
     fillProfile();
     showScreen('dashboard', { push: false });
+
+    if (remember) {
+      try { localStorage.setItem(LOCAL_USER_KEY, JSON.stringify({ email, name, picture })); } catch (e) {}
+    }
   });
 }
 
-function loadingToast(msg) { toast(msg); }
+/** Khôi phục phiên đăng nhập đã lưu khi tải lại trang — chỉ cần đăng nhập lại
+ *  khi người dùng chủ động bấm "Đăng xuất". */
+function tryRestoreSession() {
+  try {
+    const raw = localStorage.getItem(LOCAL_USER_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (saved && saved.email) completeLogin(saved.email, saved.name, saved.picture, { remember: false });
+  } catch (e) {}
+}
 
 let googleTokenClient = null;
 let googleAuthReady = false;
 
 /** Khởi tạo OAuth2 token client MỘT LẦN DUY NHẤT sau khi script GIS tải xong.
- *  Dùng popup chuẩn (initTokenClient) thay vì One Tap/FedCM (google.accounts.id.prompt)
- *  vì FedCM hay bị 403/AbortError khi domain chưa khai báo đủ hoặc mở bằng file://. */
+ *  Dùng popup chuẩn (initTokenClient) thay vì One Tap/FedCM (hay bị 403/AbortError). */
 function initGoogleAuth() {
   if (!window.google || !google.accounts || CONFIG.GOOGLE_CLIENT_ID.indexOf('DÁN_') === 0) return;
   try {
@@ -239,8 +355,7 @@ $('#btn-google-login').addEventListener('click', () => {
   if (googleAuthReady && googleTokenClient) {
     googleTokenClient.requestAccessToken();
   } else if (CONFIG.GOOGLE_CLIENT_ID.indexOf('DÁN_') === 0) {
-    // Chưa cấu hình Google OAuth Client ID -> đăng nhập tạm bằng email để xem giao diện
-    const email = prompt('Chưa cấu hình Google OAuth Client ID.\nNhập email công ty để dùng thử:', 'ban@congty.vn');
+    const email = prompt('Chưa cấu hình Google OAuth Client ID.\nNhập email công ty để dùng thử:', 'ban@vtdsmarthome.vn');
     if (email) completeLogin(email, email.split('@')[0], '');
   } else {
     toast('Đang tải Google Sign-In, vui lòng thử lại sau 1-2 giây...');
@@ -248,7 +363,10 @@ $('#btn-google-login').addEventListener('click', () => {
 });
 
 $('#btn-logout').addEventListener('click', () => {
+  if (!confirm('Đăng xuất khỏi ĐiệnTrack?')) return;
+  try { localStorage.removeItem(LOCAL_USER_KEY); } catch (e) {}
   state.user = null;
+  state.screenStack = ['dashboard'];
   $('#app-shell').classList.remove('is-active');
   $('#screen-login').classList.add('is-active');
 });
@@ -260,24 +378,26 @@ function fillProfile() {
   $('#profile-avatar').textContent = initials(state.user.Name || state.user.Email);
 }
 
-/* ---------------- DASHBOARD ---------------- */
+/* ---------------- DASHBOARD (chỉ hiện dự án + hoạt động gần đây) ---------------- */
 async function loadDashboard() {
-  const stats = await api('getStats', {});
-  $('#stat-xuat').textContent = stats.totalXuat ?? 0;
-  $('#stat-thuhoi').textContent = stats.totalThuHoi ?? 0;
-
   const list = await api('listProjects', {});
   state.projects = list.projects || [];
   renderProjectCards($('#dashboard-projects'), state.projects.slice(0, 3));
 
-  const recent = await api('listTransactions', { ProjectID: null, page: 1, pageSize: 5 });
-  // Nếu backend lọc theo ProjectID null sẽ trả rỗng ở chế độ thật; fallback: gộp từ tất cả dự án gần nhất
-  let recentItems = recent.items || [];
-  if (!DEMO_MODE && recentItems.length === 0 && state.projects[0]) {
-    const alt = await api('listTransactions', { ProjectID: state.projects[0].ProjectID, page: 1, pageSize: 5 });
-    recentItems = alt.items || [];
+  let recentItems = [];
+  if (DEMO_MODE) {
+    const recent = await api('listTransactions', { ProjectID: state.projects[0] ? state.projects[0].ProjectID : null, page: 1, pageSize: 5 });
+    recentItems = recent.items || [];
+  } else if (state.projects[0]) {
+    // Gộp hoạt động gần đây từ vài dự án gần nhất
+    const batches = await Promise.all(
+      state.projects.slice(0, 5).map(p => api('listTransactions', { ProjectID: p.ProjectID, page: 1, pageSize: 5 }))
+    );
+    recentItems = batches.flatMap(b => b.items || []);
+    recentItems.sort((a, b) => new Date(b.DateTime) - new Date(a.DateTime));
+    recentItems = recentItems.slice(0, 6);
   }
-  renderTxnCards($('#dashboard-recent'), recentItems, { showProject: false });
+  renderTxnCards($('#dashboard-recent'), recentItems, { context: 'dashboard' });
 }
 
 function renderProjectCards(container, projects) {
@@ -296,13 +416,16 @@ function renderProjectCards(container, projects) {
   });
 }
 
-function renderTxnCards(container, items, { showProject = false } = {}) {
+/** context: 'dashboard' | 'project-detail' | 'search'
+ *  Chỉ context 'project-detail' mới cho phép bấm vào để Sửa/Xóa.
+ *  'dashboard' chỉ xem nhanh (bấm mở ảnh nếu có). 'search' xử lý riêng (dạng gộp nhóm). */
+function renderTxnCards(container, items, { context = 'dashboard' } = {}) {
   container.innerHTML = '';
   if (!items.length) { container.innerHTML = '<div class="empty-state">Chưa có giao dịch nào.</div>'; return; }
-  items.forEach(t => container.appendChild(txnCardEl(t)));
+  items.forEach(t => container.appendChild(txnCardEl(t, context)));
 }
 
-function txnCardEl(t) {
+function txnCardEl(t, context) {
   const el = document.createElement('div');
   el.className = 'txn-card type-' + t.Type;
   const isXuat = t.Type === 'Xuất';
@@ -322,43 +445,87 @@ function txnCardEl(t) {
     </div>
     <span class="txn-qty">${isXuat ? '-' : '+'}${escapeHtml(String(t.Quantity))}</span>
   `;
-  el.addEventListener('click', () => {
-    if (t.ImageURL) { openImageViewer(t.ImageURL); return; }
-    openTxnActions(t);
-  });
+  if (context === 'project-detail') {
+    // Chỉ trong màn Chi tiết dự án mới được mở action Sửa/Xóa
+    el.addEventListener('click', () => openTxnAction(t));
+  } else {
+    // Dashboard: chỉ xem ảnh, không sửa/xóa được ở đây
+    el.addEventListener('click', () => { if (t.ImageURL) openImageViewer(t.ImageURL); });
+  }
   return el;
 }
 
-function openTxnActions(t) {
-  const canEdit = state.user.Role === 'Admin' || t.CreatedBy === state.user.Email;
-  if (!canEdit) return;
-  const choice = prompt('Nhập "sua" để sửa số lượng/ghi chú, hoặc "xoa" để xóa giao dịch:', '');
-  if (choice === 'xoa') {
-    if (confirm('Xóa giao dịch "' + t.ItemName + '"?')) {
-      api('deleteTransaction', { TransactionID: t.TransactionID }).then(() => {
-        toast('Đã xóa giao dịch');
+/* ---------------- TXN ACTION SHEET (thay cho prompt "sua"/"xoa") ---------------- */
+function openTxnAction(t) {
+  state.activeTxnForAction = t;
+  const isXuat = t.Type === 'Xuất';
+  $('#txn-action-body').innerHTML = `
+    ${t.ImageURL ? `<img class="txn-action-thumb" src="${escapeAttr(t.ImageURL)}" id="txn-action-thumb-img">` : ''}
+    <div class="txn-action-info">
+      <strong>${escapeHtml(t.ItemName)}</strong>
+      ${t.ItemCode ? `<div><code>${escapeHtml(t.ItemCode)}</code></div>` : ''}
+      <div>${isXuat ? 'Xuất' : 'Thu hồi'}: <strong>${escapeHtml(String(t.Quantity))}</strong></div>
+      <div>${fmtDate(t.DateTime)} · ${escapeHtml((t.CreatedBy || '').split('@')[0])}</div>
+      ${t.Note ? `<div>Ghi chú: ${escapeHtml(t.Note)}</div>` : ''}
+    </div>`;
+  if (t.ImageURL) {
+    $('#txn-action-thumb-img').addEventListener('click', () => openImageViewer(t.ImageURL));
+  }
+
+  const canEdit = hasPerm(t.CreatedBy, 'edit_all');
+  const canDelete = hasPerm(t.CreatedBy, 'delete_all');
+  const btnBox = $('#txn-action-buttons');
+  btnBox.innerHTML = '';
+  if (t.ImageURL) {
+    const viewBtn = document.createElement('button');
+    viewBtn.className = 'txn-action-view';
+    viewBtn.textContent = 'Xem ảnh đầy đủ';
+    viewBtn.addEventListener('click', () => openImageViewer(t.ImageURL));
+    btnBox.appendChild(viewBtn);
+  }
+  if (canEdit) {
+    const editBtn = document.createElement('button');
+    editBtn.className = 'txn-action-edit';
+    editBtn.textContent = 'Sửa giao dịch';
+    editBtn.addEventListener('click', () => {
+      $('#txn-action-overlay').classList.remove('is-active');
+      requirePasswordThen('Xác nhận sửa giao dịch', 'Nhập mật khẩu để sửa "' + t.ItemName + '".', () => openTxnForm(t.Type, t));
+    });
+    btnBox.appendChild(editBtn);
+  }
+  if (canDelete) {
+    const delBtn = document.createElement('button');
+    delBtn.className = 'txn-action-delete';
+    delBtn.textContent = 'Xóa giao dịch';
+    delBtn.addEventListener('click', () => {
+      $('#txn-action-overlay').classList.remove('is-active');
+      requirePasswordThen('Xác nhận xóa giao dịch', 'Nhập mật khẩu để xóa "' + t.ItemName + '". Dữ liệu sẽ được lưu vào Thùng rác, có thể khôi phục sau.', async () => {
+        const res = await api('deleteTransaction', { TransactionID: t.TransactionID });
+        if (!res.ok) { toast('Lỗi: ' + res.error); return; }
+        toast('Đã xóa giao dịch — có thể khôi phục ở Thùng rác');
         refreshCurrentScreen();
       });
-    }
-  } else if (choice === 'sua') {
-    const qty = prompt('Số lượng mới:', t.Quantity);
-    if (qty === null) return;
-    const note = prompt('Ghi chú mới:', t.Note || '');
-    api('updateTransaction', { TransactionID: t.TransactionID, Quantity: qty, Note: note }).then(() => {
-      toast('Đã cập nhật giao dịch');
-      refreshCurrentScreen();
     });
+    btnBox.appendChild(delBtn);
   }
+  if (!canEdit && !canDelete) {
+    const note = document.createElement('div');
+    note.className = 'no-permission-note';
+    note.textContent = 'Bạn không có quyền sửa/xóa giao dịch này.';
+    btnBox.appendChild(note);
+  }
+
+  $('#txn-action-overlay').classList.add('is-active');
 }
+$('[data-close-txn-action]').addEventListener('click', () => $('#txn-action-overlay').classList.remove('is-active'));
+$('#txn-action-overlay').addEventListener('click', (e) => { if (e.target.id === 'txn-action-overlay') $('#txn-action-overlay').classList.remove('is-active'); });
 
 function refreshCurrentScreen() {
   const cur = state.screenStack[state.screenStack.length - 1];
   if (cur === 'project-detail') loadProjectDetail();
   else if (cur === 'dashboard') loadDashboard();
+  else if (cur === 'trash') loadTrash();
 }
-
-function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
-function escapeAttr(s) { return escapeHtml(s); }
 
 /* ---------------- PROJECT LIST ---------------- */
 async function loadProjectList(filterText) {
@@ -380,6 +547,8 @@ function openProjectDetail(project) {
   state.pdPage = 1;
   $('#pd-name').textContent = project.ProjectName;
   $('#pd-meta').textContent = `${project.Customer || 'Chưa có khách hàng'} · ${project.Address || ''} · ${project.Status || ''}`;
+  $('#pd-edit').classList.toggle('is-hidden', !hasPerm(project.CreatedBy, 'edit_all'));
+  $('#pd-delete').classList.toggle('is-hidden', !hasPerm(project.CreatedBy, 'delete_all'));
   state.screenStack.push('project-detail');
   showScreen('project-detail', { push: false, title: 'Chi tiết dự án' });
   loadProjectDetail();
@@ -398,7 +567,7 @@ async function loadProjectDetail() {
   let items = res.items || [];
   const q = $('#pd-search').value.trim().toLowerCase();
   if (q) items = items.filter(t => (t.ItemName + t.ItemCode + (t.Note || '')).toLowerCase().includes(q));
-  renderTxnCards($('#pd-txn-list'), items);
+  renderTxnCards($('#pd-txn-list'), items, { context: 'project-detail' });
   state.pdTotal = res.total || items.length;
   const pages = Math.max(1, Math.ceil(state.pdTotal / state.pdPageSize));
   $('#pd-page-info').textContent = `Trang ${state.pdPage}/${pages}`;
@@ -412,9 +581,11 @@ $('#pd-next').addEventListener('click', () => { state.pdPage++; loadProjectDetai
 
 $('#pd-edit').addEventListener('click', () => openProjectForm(state.currentProject));
 $('#pd-delete').addEventListener('click', () => {
-  if (!confirm('Xóa dự án "' + state.currentProject.ProjectName + '"? Toàn bộ lịch sử vẫn được lưu trong AuditLog.')) return;
-  api('deleteProject', { ProjectID: state.currentProject.ProjectID }).then(() => {
-    toast('Đã xóa dự án');
+  const proj = state.currentProject;
+  requirePasswordThen('Xác nhận xóa dự án', 'Nhập mật khẩu để xóa dự án "' + proj.ProjectName + '". Dữ liệu sẽ được lưu vào Thùng rác, Admin có thể khôi phục sau.', async () => {
+    const res = await api('deleteProject', { ProjectID: proj.ProjectID });
+    if (!res.ok) { toast('Lỗi: ' + res.error); return; }
+    toast('Đã xóa dự án — có thể khôi phục ở Thùng rác');
     state.screenStack = ['projects'];
     showScreen('projects', { push: false });
   });
@@ -469,18 +640,27 @@ function populateProjectSelect() {
   if (state.currentProject) sel.value = state.currentProject.ProjectID;
 }
 
-function openTxnForm(type) {
+/** existingTxn: nếu có -> chế độ SỬA (không phải tạo mới) */
+function openTxnForm(type, existingTxn) {
   state.pendingTxnType = type;
-  state.editingTxnId = null;
+  state.editingTxnId = existingTxn ? existingTxn.TransactionID : null;
   state.pendingPhotoBase64 = null;
+  state.pendingPhotoMime = null;
   populateProjectSelect();
-  $('#txn-sheet-title').textContent = type === 'Xuất' ? 'Xuất hàng' : 'Thu hồi hàng';
+  $('#txn-sheet-title').textContent = (existingTxn ? 'Sửa: ' : '') + (type === 'Xuất' ? 'Xuất hàng' : 'Thu hồi hàng');
   $('#txn-sheet-title').style.color = type === 'Xuất' ? 'var(--color-xuat)' : 'var(--color-thuhoi)';
-  $('#txn-itemname').value = '';
-  $('#txn-itemcode').value = '';
-  $('#txn-qty').value = '';
-  $('#txn-note').value = '';
-  $('#txn-photo-preview').classList.add('is-hidden');
+  $('#txn-itemname').value = existingTxn ? existingTxn.ItemName : '';
+  $('#txn-itemcode').value = existingTxn ? existingTxn.ItemCode : '';
+  $('#txn-qty').value = existingTxn ? existingTxn.Quantity : '';
+  $('#txn-note').value = existingTxn ? existingTxn.Note : '';
+  if (existingTxn) $('#txn-project').value = existingTxn.ProjectID;
+
+  if (existingTxn && existingTxn.ImageURL) {
+    $('#txn-photo-preview').src = existingTxn.ImageURL;
+    $('#txn-photo-preview').classList.remove('is-hidden');
+  } else {
+    $('#txn-photo-preview').classList.add('is-hidden');
+  }
   $('#ocr-status').classList.add('is-hidden');
   $('#txn-overlay').classList.add('is-active');
   setTimeout(() => $('#txn-itemname').focus(), 250);
@@ -499,44 +679,55 @@ $('#txn-photo-input').addEventListener('change', async (e) => {
   preview.classList.remove('is-hidden');
 });
 
-$('#btn-save-txn').addEventListener('click', async () => {
+$('#btn-save-txn').addEventListener('click', () => {
   const itemName = $('#txn-itemname').value.trim();
   const qty = $('#txn-qty').value;
   if (!itemName) { toast('Vui lòng nhập tên hàng'); return; }
   if (!qty) { toast('Vui lòng nhập số lượng'); return; }
 
-  $('#btn-save-txn').textContent = 'Đang lưu...';
-  $('#btn-save-txn').disabled = true;
+  const isEdit = !!state.editingTxnId;
+  const doSave = async () => {
+    $('#btn-save-txn').textContent = 'Đang lưu...';
+    $('#btn-save-txn').disabled = true;
 
-  let imageUrl = '';
-  if (state.pendingPhotoBase64) {
-    const up = await api('uploadImage', {
-      base64Data: state.pendingPhotoBase64,
-      mimeType: state.pendingPhotoMime,
-      fileName: 'txn_' + Date.now() + '.jpg',
-      _localPreviewUrl: 'data:' + state.pendingPhotoMime + ';base64,' + state.pendingPhotoBase64
-    });
-    if (up.ok) imageUrl = up.url;
-  }
+    let imageUrl = (isEdit && state.activeTxnForAction) ? (state.activeTxnForAction.ImageURL || '') : '';
+    if (state.pendingPhotoBase64) {
+      const up = await api('uploadImage', {
+        base64Data: state.pendingPhotoBase64,
+        mimeType: state.pendingPhotoMime,
+        fileName: 'txn_' + Date.now() + '.jpg',
+        _localPreviewUrl: 'data:' + state.pendingPhotoMime + ';base64,' + state.pendingPhotoBase64
+      });
+      if (up.ok) imageUrl = up.url;
+    }
 
-  const payload = {
-    ProjectID: $('#txn-project').value,
-    Type: state.pendingTxnType,
-    ItemName: itemName,
-    ItemCode: $('#txn-itemcode').value.trim(),
-    Quantity: qty,
-    Note: $('#txn-note').value.trim(),
-    ImageURL: imageUrl
+    const payload = {
+      ProjectID: $('#txn-project').value,
+      Type: state.pendingTxnType,
+      ItemName: itemName,
+      ItemCode: $('#txn-itemcode').value.trim(),
+      Quantity: qty,
+      Note: $('#txn-note').value.trim(),
+      ImageURL: imageUrl
+    };
+    if (isEdit) payload.TransactionID = state.editingTxnId;
+
+    const res = await api(isEdit ? 'updateTransaction' : 'createTransaction', payload);
+    $('#btn-save-txn').textContent = 'Lưu';
+    $('#btn-save-txn').disabled = false;
+    if (!res.ok) { toast('Lỗi: ' + res.error); return; }
+
+    toast(isEdit ? '✓ Đã cập nhật giao dịch' : (state.pendingTxnType === 'Xuất' ? '✓ Đã ghi nhận xuất hàng' : '✓ Đã ghi nhận thu hồi'));
+    $('#txn-overlay').classList.remove('is-active');
+    refreshCurrentScreen();
   };
-  const res = await api('createTransaction', payload);
-  $('#btn-save-txn').textContent = 'Lưu';
-  $('#btn-save-txn').disabled = false;
-  if (!res.ok) { toast('Lỗi: ' + res.error); return; }
 
-  toast(state.pendingTxnType === 'Xuất' ? '✓ Đã ghi nhận xuất hàng' : '✓ Đã ghi nhận thu hồi');
-  $('#txn-overlay').classList.remove('is-active');
-  refreshCurrentScreen();
-  loadDashboard();
+  if (isEdit) {
+    // Sửa giao dịch đã được xác nhận mật khẩu ở bước mở form (openTxnAction) -> lưu thẳng
+    doSave();
+  } else {
+    doSave();
+  }
 });
 
 /* ---------------- AI OCR (Gemini) ---------------- */
@@ -556,7 +747,6 @@ $('#ocr-input').addEventListener('change', async (e) => {
 
   try {
     const base64 = await fileToBase64(file);
-    // Cũng dùng luôn ảnh này làm ảnh đính kèm giao dịch
     state.pendingPhotoBase64 = base64;
     state.pendingPhotoMime = file.type;
     const preview = $('#txn-photo-preview');
@@ -593,28 +783,166 @@ $('#ocr-input').addEventListener('change', async (e) => {
   }
 });
 
-/* ---------------- GLOBAL SEARCH ---------------- */
+/* ---------------- GLOBAL SEARCH (chỉ xem, gộp số lượng theo từng dự án) ---------------- */
 let searchDebounce;
 $('#global-search').addEventListener('input', (e) => {
   clearTimeout(searchDebounce);
   const q = e.target.value.trim();
   searchDebounce = setTimeout(async () => {
-    if (!q) { $('#global-search-results').innerHTML = ''; return; }
+    const container = $('#global-search-results');
+    if (!q) { container.innerHTML = ''; return; }
+    if (!state.projects.length) { const pr = await api('listProjects', {}); state.projects = pr.projects || []; }
     const res = await api('searchTransactions', { q });
-    renderTxnCards($('#global-search-results'), res.items || []);
+    renderSearchGroups(container, res.items || []);
   }, 300);
 });
 
-/* ---------------- USERS ---------------- */
+function renderSearchGroups(container, items) {
+  container.innerHTML = '';
+  if (!items.length) { container.innerHTML = '<div class="empty-state">Không tìm thấy kết quả.</div>'; return; }
+
+  // Gộp theo mã hàng (hoặc tên hàng nếu không có mã), rồi theo từng dự án
+  const groups = new Map();
+  items.forEach(t => {
+    const key = (t.ItemCode && String(t.ItemCode).trim()) ? String(t.ItemCode).trim().toLowerCase() : String(t.ItemName).trim().toLowerCase();
+    if (!groups.has(key)) groups.set(key, { itemName: t.ItemName, itemCode: t.ItemCode, byProject: new Map() });
+    const g = groups.get(key);
+    if (!g.byProject.has(t.ProjectID)) g.byProject.set(t.ProjectID, { xuat: 0, thuhoi: 0 });
+    const pg = g.byProject.get(t.ProjectID);
+    const qty = Number(t.Quantity) || 0;
+    if (t.Type === 'Xuất') pg.xuat += qty; else pg.thuhoi += qty;
+  });
+
+  groups.forEach(g => {
+    const card = document.createElement('div');
+    card.className = 'search-group-card';
+    let rows = '';
+    g.byProject.forEach((v, projectId) => {
+      rows += `<div class="search-group-row">
+        <span class="sg-project">${escapeHtml(projectNameById(projectId))}</span>
+        <span class="sg-qty sg-xuat">Xuất ${v.xuat}</span>
+        <span class="sg-qty sg-thuhoi">Thu hồi ${v.thuhoi}</span>
+      </div>`;
+    });
+    card.innerHTML = `
+      <div class="search-group-head">
+        <strong>${escapeHtml(g.itemName)}</strong>
+        ${g.itemCode ? `<code>${escapeHtml(g.itemCode)}</code>` : ''}
+      </div>
+      ${rows}`;
+    container.appendChild(card);
+  });
+}
+
+/* ---------------- USERS & PHÂN QUYỀN ---------------- */
 async function loadUsers() {
   const res = await api('listUsers', {});
   const container = $('#users-list');
   container.innerHTML = '';
+  const isAdmin = state.user.Role === 'Admin';
+
   (res.users || []).forEach(u => {
+    const perms = String(u.Permissions || '').split(',').map(s => s.trim()).filter(Boolean);
     const el = document.createElement('div');
-    el.className = 'project-card';
-    el.innerHTML = `<strong>${escapeHtml(u.Name || u.Email)}</strong><span>${escapeHtml(u.Email)}</span><span class="status-chip">${escapeHtml(u.Role || 'Viewer')}</span>`;
+    el.className = 'project-card user-card';
+
+    if (!isAdmin) {
+      el.innerHTML = `
+        <div class="user-card-head">
+          <span class="user-card-avatar">${initials(u.Name || u.Email)}</span>
+          <div>
+            <div class="user-card-name">${escapeHtml(u.Name || u.Email)}</div>
+            <div class="user-card-email">${escapeHtml(u.Email)}</div>
+          </div>
+        </div>
+        <span class="status-chip">${escapeHtml(u.Role || 'Viewer')}</span>`;
+      container.appendChild(el);
+      return;
+    }
+
+    const uid = 'u_' + btoa(unescape(encodeURIComponent(u.Email))).replace(/[^a-zA-Z0-9]/g, '');
+    el.innerHTML = `
+      <div class="user-card-head">
+        <span class="user-card-avatar">${initials(u.Name || u.Email)}</span>
+        <div>
+          <div class="user-card-name">${escapeHtml(u.Name || u.Email)}</div>
+          <div class="user-card-email">${escapeHtml(u.Email)}</div>
+        </div>
+      </div>
+      <div class="user-card-controls">
+        <select class="user-role-select" id="role-${uid}">
+          <option value="Admin" ${u.Role === 'Admin' ? 'selected' : ''}>Admin — Toàn quyền (kể cả xóa dự án)</option>
+          <option value="Staff" ${u.Role === 'Staff' || !u.Role ? 'selected' : ''}>Staff — Chỉ thêm/sửa dữ liệu của mình</option>
+          <option value="Viewer" ${u.Role === 'Viewer' ? 'selected' : ''}>Viewer — Chỉ xem</option>
+        </select>
+        <div class="perm-toggle-row">
+          <label class="perm-toggle">
+            <input type="checkbox" id="perm-edit-${uid}" ${perms.includes('edit_all') ? 'checked' : ''}>
+            Được sửa dự án/giao dịch của người khác
+          </label>
+          <label class="perm-toggle">
+            <input type="checkbox" id="perm-delete-${uid}" ${perms.includes('delete_all') ? 'checked' : ''}>
+            Được xóa dự án/giao dịch của người khác
+          </label>
+        </div>
+        <button class="user-save-btn" data-save-user="${escapeAttr(u.Email)}" data-uid="${uid}">Lưu thay đổi</button>
+      </div>`;
     container.appendChild(el);
+  });
+
+  $$('[data-save-user]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const email = btn.dataset.saveUser;
+      const uid = btn.dataset.uid;
+      const role = $('#role-' + uid).value;
+      const perms = [];
+      if ($('#perm-edit-' + uid).checked) perms.push('edit_all');
+      if ($('#perm-delete-' + uid).checked) perms.push('delete_all');
+      const res = await api('setUserRole', { Email: email, Role: role, Permissions: perms.join(',') });
+      if (!res.ok) { toast('Lỗi: ' + res.error); return; }
+      toast('Đã cập nhật quyền cho ' + email);
+      if (email === state.user.Email) { state.user.Role = role; state.user.Permissions = perms.join(','); fillProfile(); }
+    });
+  });
+}
+
+/* ---------------- TRASH / BACKUP (khôi phục dữ liệu lỡ xóa nhầm) ---------------- */
+async function loadTrash() {
+  const container = $('#trash-list');
+  if (state.user.Role !== 'Admin') {
+    container.innerHTML = '<div class="empty-state">Chỉ Admin mới xem được thùng rác.</div>';
+    return;
+  }
+  const res = await api('listBackups', {});
+  const items = res.items || [];
+  container.innerHTML = '';
+  if (!items.length) { container.innerHTML = '<div class="empty-state">Thùng rác trống — chưa có dữ liệu nào bị xóa.</div>'; return; }
+
+  items.forEach(b => {
+    let data = {};
+    try { data = JSON.parse(b.RecordData); } catch (e) {}
+    const label = b.Table === 'Projects' ? (data.ProjectName || b.RecordID) : (data.ItemName || b.RecordID);
+    const typeLabel = b.Table === 'Projects' ? 'Dự án' : 'Giao dịch';
+    const el = document.createElement('div');
+    el.className = 'project-card backup-card';
+    el.innerHTML = `
+      <div class="backup-body">
+        <strong>${escapeHtml(label)}</strong>
+        <span>${typeLabel} · Xóa bởi ${escapeHtml((b.DeletedBy || '').split('@')[0])} · ${fmtDate(b.DeletedTime)}</span>
+      </div>
+      <button class="backup-restore-btn" data-restore="${escapeAttr(b.BackupID)}">Khôi phục</button>`;
+    container.appendChild(el);
+  });
+
+  $$('[data-restore]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Khôi phục lại bản ghi này?')) return;
+      const res = await api('restoreBackup', { BackupID: btn.dataset.restore });
+      if (!res.ok) { toast('Lỗi: ' + res.error); return; }
+      toast('✓ Đã khôi phục thành công');
+      loadTrash();
+      loadDashboard();
+    });
   });
 }
 
@@ -638,7 +966,7 @@ $('#image-viewer').addEventListener('click', (e) => { if (e.target.id === 'image
 /* ---------------- PWA MANIFEST (tạo động bằng Blob, tránh lỗi encode data-URI) ---------------- */
 (function setupManifest() {
   const manifest = {
-    name: 'ĐiệnTrack',
+    name: 'ĐiệnTrack - VTD Smarthome',
     short_name: 'ĐiệnTrack',
     start_url: '.',
     display: 'standalone',
@@ -654,9 +982,7 @@ $('#image-viewer').addEventListener('click', (e) => { if (e.target.id === 'image
 
 /* ---------------- SERVICE WORKER (PWA offline shell, tuỳ chọn) ---------------- */
 if ('serviceWorker' in navigator) {
-  const swCode = `
-    self.addEventListener('fetch', e => {});
-  `;
+  const swCode = `self.addEventListener('fetch', e => {});`;
   const blob = new Blob([swCode], { type: 'application/javascript' });
   navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(() => {});
 }
@@ -664,3 +990,6 @@ if ('serviceWorker' in navigator) {
 if (DEMO_MODE) {
   console.warn('ĐiệnTrack đang chạy DEMO MODE (dữ liệu giả, chỉ trong bộ nhớ). Điền CONFIG.API_URL trong app.js để kết nối Google Sheets thật.');
 }
+
+/* ---------------- KHỞI ĐỘNG: khôi phục phiên đăng nhập nếu có ---------------- */
+tryRestoreSession();
