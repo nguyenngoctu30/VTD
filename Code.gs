@@ -17,6 +17,7 @@
 const SPREADSHEET_ID = '1RMLPg_W5tVfxZFIWvK6S-Pf0RyM3p8Y6Ayg4E7KSuoc';
 const DRIVE_FOLDER_ID = '1bvhZnLNE2okrZzfgV3TFsCclxEPNHFwB';
 
+
 const SHEETS = {
   PROJECTS: 'Projects',
   TRANSACTIONS: 'Transactions',
@@ -24,6 +25,10 @@ const SHEETS = {
   USERS: 'Users',
   BACKUP: 'Backup'
 };
+
+// Đổi chuỗi này mỗi lần bạn deploy để tự kiểm tra xem web đang chạy đúng bản mới nhất chưa:
+// mở .../exec?action=ping trên trình duyệt (GET) -> phải thấy đúng version này.
+const BACKEND_VERSION = 'v4-2026-07-23-group-permission-trash';
 
 // ---------- ENTRY POINTS ----------
 function doGet(e) {
@@ -56,8 +61,11 @@ function handleRequest(e) {
       case 'listUsers': result = listUsers(); break;
       case 'upsertUser': result = upsertUser(params); break;
       case 'setUserRole': result = setUserRole(params, userEmail); break;
-      case 'listBackups': result = listBackups(params); break;
+      case 'listBackups': result = listBackups(params, userEmail); break;
       case 'restoreBackup': result = restoreBackup(params, userEmail); break;
+      case 'purgeBackup': result = purgeBackup(params, userEmail); break;
+      case 'syncExternalDeletions': result = manualSyncExternalDeletions(userEmail); break;
+      case 'ping': result = { ok: true, version: BACKEND_VERSION }; break;
       default: result = { ok: false, error: 'Unknown action: ' + action };
     }
   } catch (err) {
@@ -148,9 +156,28 @@ function assertCanModify(email, ownerEmail, permKey) {
   throw new Error('Bạn không có quyền thực hiện thao tác này. Liên hệ Admin để được ủy quyền.');
 }
 
+function isProjectOwner(email) {
+  const projects = sheetToObjects(sheet(SHEETS.PROJECTS));
+  return projects.some(pr => pr.CreatedBy === email);
+}
+
+/** Coi người TẠO ÍT NHẤT 1 DỰ ÁN cũng có quyền như Admin đối với: quản lý phân quyền,
+ *  xem Thùng rác, khôi phục, xóa vĩnh viễn. Chỉ việc "phong Admin cho người khác" vẫn
+ *  cần Admin thật (chặn ở setUserRole riêng). */
+function canManageSystem(email) {
+  const user = getUserRecord(email);
+  if (user && user.Role === 'Admin') return true;
+  return isProjectOwner(email);
+}
+
 function setUserRole(p, actingEmail) {
   const acting = getUserRecord(actingEmail);
-  if (!acting || acting.Role !== 'Admin') throw new Error('Chỉ Admin mới có quyền phân quyền tài khoản khác');
+  if (!acting) throw new Error('Tài khoản chưa được đăng ký trong hệ thống');
+  const isAdmin = acting.Role === 'Admin';
+  const canManage = isAdmin || isProjectOwner(actingEmail);
+  if (!canManage) throw new Error('Chỉ Admin hoặc người đã tạo ít nhất 1 dự án mới có quyền phân quyền tài khoản khác');
+  if (!isAdmin && p.Role === 'Admin') throw new Error('Chỉ Admin mới có quyền cấp vai trò Admin cho tài khoản khác');
+
   const sh = sheet(SHEETS.USERS);
   const rowIdx = findRowIndexById(sh, 'Email', p.Email);
   if (rowIdx === -1) return { ok: false, error: 'Không tìm thấy người dùng' };
@@ -183,7 +210,8 @@ function backupRecord(table, recordId, recordObj, deletedBy) {
   });
 }
 
-function listBackups(p) {
+function listBackups(p, actingEmail) {
+  if (!canManageSystem(actingEmail)) throw new Error('Chỉ Admin hoặc người đã tạo dự án mới xem được Thùng rác');
   let items = sheetToObjects(sheet(SHEETS.BACKUP));
   if (p && p.Table) items = items.filter(b => b.Table === p.Table);
   items = items.filter(b => String(b.Restored) !== 'Y');
@@ -192,8 +220,7 @@ function listBackups(p) {
 }
 
 function restoreBackup(p, actingEmail) {
-  const acting = getUserRecord(actingEmail);
-  if (!acting || acting.Role !== 'Admin') throw new Error('Chỉ Admin mới có quyền khôi phục dữ liệu');
+  if (!canManageSystem(actingEmail)) throw new Error('Chỉ Admin hoặc người đã tạo dự án mới có quyền khôi phục dữ liệu');
 
   const sh = sheet(SHEETS.BACKUP);
   const rowIdx = findRowIndexById(sh, 'BackupID', p.BackupID);
@@ -211,6 +238,77 @@ function restoreBackup(p, actingEmail) {
 
   logAudit(actingEmail, 'RESTORE', targetSheetName, backupObj.RecordID, null, recordObj);
   return { ok: true };
+}
+
+/** Xóa vĩnh viễn 1 bản ghi khỏi Thùng rác — KHÔNG thể hoàn tác. Chỉ Admin. */
+function purgeBackup(p, actingEmail) {
+  if (!canManageSystem(actingEmail)) throw new Error('Chỉ Admin hoặc người đã tạo dự án mới có quyền xóa vĩnh viễn');
+  const sh = sheet(SHEETS.BACKUP);
+  const rowIdx = findRowIndexById(sh, 'BackupID', p.BackupID);
+  if (rowIdx === -1) return { ok: false, error: 'Không tìm thấy bản sao lưu' };
+  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const row = sh.getRange(rowIdx, 1, 1, headers.length).getValues()[0];
+  const backupObj = {}; headers.forEach((h, i) => backupObj[h] = row[i]);
+  sh.deleteRow(rowIdx);
+  logAudit(actingEmail, 'PURGE', backupObj.Table, backupObj.RecordID, backupObj, null);
+  return { ok: true };
+}
+
+/** Quét & phát hiện các dòng bị xóa TRỰC TIẾP trong Google Sheet (không qua app),
+ *  bằng cách so sánh với bản mirror (_SnapshotProjects / _SnapshotTransactions)
+ *  được cập nhật ở lần quét trước. Bất kỳ ID nào có trong mirror nhưng biến mất
+ *  khỏi sheet sống đều được backup lại để Admin có thể khôi phục/xóa vĩnh viễn. */
+function syncExternalDeletions() {
+  const c1 = syncOneTable(SHEETS.PROJECTS, '_SnapshotProjects', 'ProjectID');
+  const c2 = syncOneTable(SHEETS.TRANSACTIONS, '_SnapshotTransactions', 'TransactionID');
+  return c1 + c2;
+}
+
+function syncOneTable(liveName, snapName, idField) {
+  const liveSh = sheet(liveName);
+  const snapSh = sheet(snapName);
+  const liveData = sheetToObjects(liveSh);
+  const snapData = sheetToObjects(snapSh);
+
+  const liveIds = {};
+  liveData.forEach(r => liveIds[String(r[idField])] = true);
+
+  let backedUpCount = 0;
+  if (snapData.length > 0) {
+    snapData.forEach(row => {
+      if (!liveIds[String(row[idField])]) {
+        backupRecord(liveName, row[idField], row, '(Xóa trực tiếp trong Google Sheet)');
+        backedUpCount++;
+      }
+    });
+  }
+
+  // Cập nhật lại mirror = đúng bản hiện tại của sheet sống, để lần quét sau so sánh đúng
+  const headers = liveSh.getRange(1, 1, 1, liveSh.getLastColumn()).getValues()[0];
+  snapSh.clearContents();
+  snapSh.getRange(1, 1, 1, headers.length).setValues([headers]);
+  if (liveData.length > 0) {
+    const rows = liveData.map(obj => headers.map(h => obj[h] !== undefined ? obj[h] : ''));
+    snapSh.getRange(2, 1, rows.length, headers.length).setValues(rows);
+  }
+  return backedUpCount;
+}
+
+/** Admin bấm nút "Quét xóa ngoài Sheet" trong app để kiểm tra ngay lập tức
+ *  (ngoài ra hệ thống cũng tự quét định kỳ nhờ trigger được tạo trong setupSpreadsheet). */
+function manualSyncExternalDeletions(actingEmail) {
+  if (!canManageSystem(actingEmail)) throw new Error('Chỉ Admin hoặc người đã tạo dự án mới quét được dữ liệu xóa ngoài Sheet');
+  const count = syncExternalDeletions();
+  return { ok: true, count: count };
+}
+
+/** Tạo trigger tự động chạy syncExternalDeletions mỗi 10 phút (chỉ tạo 1 lần, không nhân bản). */
+function ensureSyncTrigger() {
+  const triggers = ScriptApp.getProjectTriggers();
+  const exists = triggers.some(t => t.getHandlerFunction() === 'syncExternalDeletions');
+  if (!exists) {
+    ScriptApp.newTrigger('syncExternalDeletions').timeBased().everyMinutes(10).create();
+  }
 }
 
 // ---------- BOOTSTRAP ----------
@@ -402,7 +500,10 @@ function setupSpreadsheet() {
     // Permissions: danh sách quyền được Admin ủy quyền, cách nhau bởi dấu phẩy. VD: "edit_all,delete_all"
     Users: ['Email', 'Name', 'Avatar', 'Role', 'Permissions'],
     // Backup: lưu bản sao đầy đủ của mọi bản ghi đã xóa để có thể khôi phục khi lỡ xóa nhầm
-    Backup: ['BackupID', 'Table', 'RecordID', 'RecordData', 'DeletedBy', 'DeletedTime', 'Restored', 'RestoredBy', 'RestoredTime']
+    Backup: ['BackupID', 'Table', 'RecordID', 'RecordData', 'DeletedBy', 'DeletedTime', 'Restored', 'RestoredBy', 'RestoredTime'],
+    // Sheet mirror nội bộ, dùng để phát hiện khi có dòng bị xóa TRỰC TIẾP trong Google Sheet (không qua app)
+    _SnapshotProjects: ['ProjectID', 'ProjectName', 'Customer', 'Address', 'Status', 'CreatedDate', 'CreatedBy'],
+    _SnapshotTransactions: ['TransactionID', 'ProjectID', 'Type', 'DateTime', 'ItemName', 'ItemCode', 'Quantity', 'Note', 'ImageURL', 'CreatedBy', 'CreatedTime']
   };
   Object.keys(schemas).forEach(name => {
     let sh = s.getSheetByName(name);
@@ -419,6 +520,15 @@ function setupSpreadsheet() {
         }
       });
     }
+    if (name.indexOf('_Snapshot') === 0) {
+      try { sh.hideSheet(); } catch (e) {}
+    }
   });
-  Logger.log('Setup xong! (Đã kiểm tra và bổ sung cột/sheet còn thiếu nếu có)');
+
+  // Khởi tạo baseline cho mirror (lần đầu chạy sẽ không backup gì, chỉ đồng bộ)
+  syncExternalDeletions();
+  // Tạo trigger tự động quét mỗi 10 phút để phát hiện xóa trực tiếp trong Sheet
+  try { ensureSyncTrigger(); } catch (e) { Logger.log('Không tạo được trigger tự động: ' + e.message); }
+
+  Logger.log('Setup xong! (Đã kiểm tra/bổ sung sheet, cột còn thiếu, và bật quét tự động chống xóa nhầm ngoài Sheet)');
 }

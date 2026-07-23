@@ -1,7 +1,7 @@
 
 const CONFIG = {
   // URL Web App sau khi deploy Code.gs (Deploy > New deployment > Web app)
-  API_URL: 'https://script.google.com/macros/s/AKfycbw1ww5gG_0_lddRjFMwxVCBePoAh7FVml5MLEFfcIwxVaWFuJAnp7IwjDlTHW5cKDvc/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbxirdv5D6ZHWmIfKYsjePGivSEookCLEj18lvbQk1T0Ea-23KOaqfckAaiKtnQoej4/exec',
 
   // Client ID từ Google Cloud Console > OAuth consent > Credentials
   // (Tạo "OAuth client ID" loại "Web application")
@@ -12,7 +12,7 @@ const CONFIG = {
   // Dùng cho tính năng OCR (AI đọc ảnh phiếu xuất) qua Gemini API.
   GEMINI_API_KEY: 'AIzaSyDUfmSJMUWq9RGiufzRXDcUekHqDhLtUP8',
   GEMINI_MODEL: 'gemini-2.0-flash',
-  CONFIRM_PASSWORD: 'changepassword123'
+  CONFIRM_PASSWORD: 'vtd123'
 };
 
 
@@ -160,6 +160,12 @@ function demoApi(action, p) {
       if (b.Table === 'Projects') demoStore.projects.unshift(record);
       else demoStore.transactions.unshift(record);
       b.Restored = 'Y';
+      return { ok: true };
+    }
+    case 'purgeBackup': {
+      const idx = demoStore.backups.findIndex(x => x.BackupID === p.BackupID);
+      if (idx === -1) return { ok: false, error: 'Không tìm thấy bản sao lưu' };
+      demoStore.backups.splice(idx, 1);
       return { ok: true };
     }
     case 'uploadImage':
@@ -455,7 +461,56 @@ function txnCardEl(t, context) {
   return el;
 }
 
-/* ---------------- TXN ACTION SHEET (thay cho prompt "sua"/"xoa") ---------------- */
+/** Trong 1 dự án: gộp các giao dịch có cùng mã hàng (hoặc cùng tên nếu không có mã),
+ *  tính tổng Xuất/Thu hồi, và liệt kê từng lần cập nhật (kèm thời gian) bên dưới.
+ *  Bấm vào 1 dòng cụ thể vẫn mở được Sửa/Xóa như bình thường. */
+function renderProjectDetailGrouped(container, items) {
+  container.innerHTML = '';
+  if (!items.length) { container.innerHTML = '<div class="empty-state">Chưa có giao dịch nào.</div>'; return; }
+
+  const groups = new Map();
+  const order = [];
+  items.forEach(t => {
+    const key = (t.ItemCode && String(t.ItemCode).trim()) ? String(t.ItemCode).trim().toLowerCase() : String(t.ItemName).trim().toLowerCase();
+    if (!groups.has(key)) { groups.set(key, { itemName: t.ItemName, itemCode: t.ItemCode, xuat: 0, thuhoi: 0, txns: [] }); order.push(key); }
+    const g = groups.get(key);
+    const qty = Number(t.Quantity) || 0;
+    if (t.Type === 'Xuất') g.xuat += qty; else g.thuhoi += qty;
+    g.txns.push(t);
+  });
+
+  order.forEach(key => {
+    const g = groups.get(key);
+    const card = document.createElement('div');
+    card.className = 'pd-group-card';
+    card.innerHTML = `
+      <div class="pd-group-head">
+        <strong>${escapeHtml(g.itemName)}</strong>
+        ${g.itemCode ? `<code>${escapeHtml(g.itemCode)}</code>` : ''}
+        <span class="pd-group-total">
+          <span class="sg-qty sg-xuat">Xuất ${g.xuat}</span>
+          <span class="sg-qty sg-thuhoi">Thu hồi ${g.thuhoi}</span>
+        </span>
+      </div>
+      <div class="pd-group-rows"></div>`;
+    const rowsBox = card.querySelector('.pd-group-rows');
+    g.txns.forEach(t => {
+      const isXuat = t.Type === 'Xuất';
+      const row = document.createElement('div');
+      row.className = 'pd-group-row';
+      row.innerHTML = `
+        <div class="pd-row-main">
+          <span class="pd-row-date">${fmtDate(t.DateTime)}</span>
+          <span class="pd-row-qty ${isXuat ? 'sg-xuat' : 'sg-thuhoi'}">${isXuat ? '-' : '+'}${escapeHtml(String(t.Quantity))}</span>
+        </div>
+        ${t.Note ? `<div class="pd-row-note">${escapeHtml(t.Note)}</div>` : ''}
+        <div class="pd-row-by">${escapeHtml((t.CreatedBy || '').split('@')[0])}${t.ImageURL ? ' · 📷 có ảnh' : ''}</div>`;
+      row.addEventListener('click', () => openTxnAction(t));
+      rowsBox.appendChild(row);
+    });
+    container.appendChild(card);
+  });
+}
 function openTxnAction(t) {
   state.activeTxnForAction = t;
   const isXuat = t.Type === 'Xuất';
@@ -567,7 +622,7 @@ async function loadProjectDetail() {
   let items = res.items || [];
   const q = $('#pd-search').value.trim().toLowerCase();
   if (q) items = items.filter(t => (t.ItemName + t.ItemCode + (t.Note || '')).toLowerCase().includes(q));
-  renderTxnCards($('#pd-txn-list'), items, { context: 'project-detail' });
+  renderProjectDetailGrouped($('#pd-txn-list'), items);
   state.pdTotal = res.total || items.length;
   const pages = Math.max(1, Math.ceil(state.pdTotal / state.pdPageSize));
   $('#pd-page-info').textContent = `Trang ${state.pdPage}/${pages}`;
@@ -841,12 +896,18 @@ async function loadUsers() {
   container.innerHTML = '';
   const isAdmin = state.user.Role === 'Admin';
 
+  // Người đã tạo ít nhất 1 dự án cũng được quản lý quyền (không chỉ riêng Admin) —
+  // nhưng chỉ Admin thật mới được phong vai trò Admin cho người khác (chặn leo thang quyền).
+  if (!state.projects.length) { const pr = await api('listProjects', {}); state.projects = pr.projects || []; }
+  const isProjectOwner = state.projects.some(p => p.CreatedBy === state.user.Email);
+  const canManage = isAdmin || isProjectOwner;
+
   (res.users || []).forEach(u => {
     const perms = String(u.Permissions || '').split(',').map(s => s.trim()).filter(Boolean);
     const el = document.createElement('div');
     el.className = 'project-card user-card';
 
-    if (!isAdmin) {
+    if (!canManage) {
       el.innerHTML = `
         <div class="user-card-head">
           <span class="user-card-avatar">${initials(u.Name || u.Email)}</span>
@@ -861,6 +922,10 @@ async function loadUsers() {
     }
 
     const uid = 'u_' + btoa(unescape(encodeURIComponent(u.Email))).replace(/[^a-zA-Z0-9]/g, '');
+    // Người quản lý mà không phải Admin thật (chỉ là chủ dự án) thì không được cấp quyền Admin cho người khác
+    const adminOption = isAdmin
+      ? `<option value="Admin" ${u.Role === 'Admin' ? 'selected' : ''}>Admin — Toàn quyền (kể cả xóa dự án)</option>`
+      : (u.Role === 'Admin' ? `<option value="Admin" selected disabled>Admin — Toàn quyền (chỉ Admin mới đổi được)</option>` : '');
     el.innerHTML = `
       <div class="user-card-head">
         <span class="user-card-avatar">${initials(u.Name || u.Email)}</span>
@@ -870,8 +935,8 @@ async function loadUsers() {
         </div>
       </div>
       <div class="user-card-controls">
-        <select class="user-role-select" id="role-${uid}">
-          <option value="Admin" ${u.Role === 'Admin' ? 'selected' : ''}>Admin — Toàn quyền (kể cả xóa dự án)</option>
+        <select class="user-role-select" id="role-${uid}" ${(!isAdmin && u.Role === 'Admin') ? 'disabled' : ''}>
+          ${adminOption}
           <option value="Staff" ${u.Role === 'Staff' || !u.Role ? 'selected' : ''}>Staff — Chỉ thêm/sửa dữ liệu của mình</option>
           <option value="Viewer" ${u.Role === 'Viewer' ? 'selected' : ''}>Viewer — Chỉ xem</option>
         </select>
@@ -894,7 +959,8 @@ async function loadUsers() {
     btn.addEventListener('click', async () => {
       const email = btn.dataset.saveUser;
       const uid = btn.dataset.uid;
-      const role = $('#role-' + uid).value;
+      const roleSelect = $('#role-' + uid);
+      const role = roleSelect.disabled ? 'Admin' : roleSelect.value;
       const perms = [];
       if ($('#perm-edit-' + uid).checked) perms.push('edit_all');
       if ($('#perm-delete-' + uid).checked) perms.push('delete_all');
@@ -909,11 +975,14 @@ async function loadUsers() {
 /* ---------------- TRASH / BACKUP (khôi phục dữ liệu lỡ xóa nhầm) ---------------- */
 async function loadTrash() {
   const container = $('#trash-list');
-  if (state.user.Role !== 'Admin') {
-    container.innerHTML = '<div class="empty-state">Chỉ Admin mới xem được thùng rác.</div>';
+  if (!state.projects.length) { const pr = await api('listProjects', {}); state.projects = pr.projects || []; }
+  const canManage = state.user.Role === 'Admin' || state.projects.some(p => p.CreatedBy === state.user.Email);
+  if (!canManage) {
+    container.innerHTML = '<div class="empty-state">Chỉ Admin hoặc người đã tạo dự án mới xem được thùng rác.</div>';
     return;
   }
   const res = await api('listBackups', {});
+  if (!res.ok) { container.innerHTML = `<div class="empty-state">${escapeHtml(res.error)}</div>`; return; }
   const items = res.items || [];
   container.innerHTML = '';
   if (!items.length) { container.innerHTML = '<div class="empty-state">Thùng rác trống — chưa có dữ liệu nào bị xóa.</div>'; return; }
@@ -930,7 +999,10 @@ async function loadTrash() {
         <strong>${escapeHtml(label)}</strong>
         <span>${typeLabel} · Xóa bởi ${escapeHtml((b.DeletedBy || '').split('@')[0])} · ${fmtDate(b.DeletedTime)}</span>
       </div>
-      <button class="backup-restore-btn" data-restore="${escapeAttr(b.BackupID)}">Khôi phục</button>`;
+      <div class="backup-actions">
+        <button class="backup-restore-btn" data-restore="${escapeAttr(b.BackupID)}">Khôi phục</button>
+        <button class="backup-purge-btn" data-purge="${escapeAttr(b.BackupID)}" data-label="${escapeAttr(label)}">Xóa vĩnh viễn</button>
+      </div>`;
     container.appendChild(el);
   });
 
@@ -942,6 +1014,17 @@ async function loadTrash() {
       toast('✓ Đã khôi phục thành công');
       loadTrash();
       loadDashboard();
+    });
+  });
+
+  $$('[data-purge]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      requirePasswordThen('Xác nhận xóa vĩnh viễn', 'Nhập mật khẩu để xóa VĨNH VIỄN "' + btn.dataset.label + '" — KHÔNG THỂ khôi phục sau bước này.', async () => {
+        const res = await api('purgeBackup', { BackupID: btn.dataset.purge });
+        if (!res.ok) { toast('Lỗi: ' + res.error); return; }
+        toast('Đã xóa vĩnh viễn');
+        loadTrash();
+      });
     });
   });
 }
