@@ -81,6 +81,7 @@
         <div class="chip-row">
           <button class="chip" id="pd-edit">Sửa dự án</button>
           <button class="chip chip-danger" id="pd-delete">Xóa dự án</button>
+          <button class="chip chip-excel" id="pd-export-excel">⬇ Xuất Excel</button>
         </div>
       </div>
 
@@ -318,6 +319,8 @@
 <!-- ============ TOAST ============ -->
 <div id="toast" class="toast"></div>
 
+<!-- Thư viện SheetJS để xuất file Excel (.xlsx) ngay trên trình duyệt, không cần backend -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

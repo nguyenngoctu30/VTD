@@ -1,4 +1,3 @@
-
 const CONFIG = {
   // URL Web App sau khi deploy Code.gs (Deploy > New deployment > Web app)
   API_URL: 'https://script.google.com/macros/s/AKfycbxirdv5D6ZHWmIfKYsjePGivSEookCLEj18lvbQk1T0Ea-23KOaqfckAaiKtnQoej4/exec',
@@ -645,6 +644,75 @@ $('#pd-delete').addEventListener('click', () => {
     showScreen('projects', { push: false });
   });
 });
+
+/* ---------------- XUẤT FILE EXCEL (.xlsx) CHO TỪNG DỰ ÁN ----------------
+ * Lấy TOÀN BỘ giao dịch (không phân trang) của dự án đang mở, xuất ra file Excel
+ * gồm: thông tin dự án, danh sách từng giao dịch Xuất/Thu hồi, và tổng cộng cuối bảng.
+ * Chạy hoàn toàn trên trình duyệt bằng thư viện SheetJS — không cần chỉnh Code.gs. */
+async function exportProjectToExcel() {
+  const proj = state.currentProject;
+  if (!proj) { toast('Vui lòng chọn một dự án trước'); return; }
+  if (typeof XLSX === 'undefined') { toast('Không tải được thư viện xuất Excel, vui lòng thử lại'); return; }
+
+  const btn = $('#pd-export-excel');
+  const oldText = btn.textContent;
+  btn.textContent = 'Đang tạo file...';
+  btn.disabled = true;
+
+  try {
+    // Lấy toàn bộ giao dịch của dự án (bỏ qua phân trang, lấy pageSize lớn)
+    const res = await api('listTransactions', { ProjectID: proj.ProjectID, page: 1, pageSize: 100000 });
+    if (!res.ok) { toast('Lỗi: ' + res.error); return; }
+    const items = (res.items || []).slice().sort((a, b) => new Date(a.DateTime) - new Date(b.DateTime));
+
+    const rows = [
+      ['DỰ ÁN:', proj.ProjectName],
+      ['Khách hàng:', proj.Customer || ''],
+      ['Địa chỉ:', proj.Address || ''],
+      ['Trạng thái:', proj.Status || ''],
+      ['Ngày xuất báo cáo:', fmtDate(new Date())],
+      [],
+      ['Loại', 'Ngày giờ', 'Tên hàng', 'Mã hàng', 'Số lượng', 'Ghi chú', 'Người tạo']
+    ];
+
+    let totalXuat = 0, totalThuHoi = 0;
+    items.forEach(t => {
+      const qty = Number(t.Quantity) || 0;
+      if (t.Type === 'Xuất') totalXuat += qty; else totalThuHoi += qty;
+      rows.push([
+        t.Type === 'Xuất' ? 'Xuất' : 'Thu hồi',
+        fmtDate(t.DateTime),
+        t.ItemName || '',
+        t.ItemCode || '',
+        qty,
+        t.Note || '',
+        (t.CreatedBy || '').split('@')[0]
+      ]);
+    });
+
+    rows.push([]);
+    rows.push(['', '', '', '', '', 'Tổng xuất:', totalXuat]);
+    rows.push(['', '', '', '', '', 'Tổng thu hồi:', totalThuHoi]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [
+      { wch: 10 }, { wch: 18 }, { wch: 30 }, { wch: 14 }, { wch: 10 }, { wch: 32 }, { wch: 16 }
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Xuất-Nhập');
+
+    const safeName = String(proj.ProjectName || 'DuAn').replace(/[\\/:*?"<>|]/g, '').trim();
+    const fileName = `XuatNhap_${safeName}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+    toast('✓ Đã xuất file Excel: ' + fileName);
+  } catch (err) {
+    toast('Lỗi khi xuất Excel: ' + err.message);
+  } finally {
+    btn.textContent = oldText;
+    btn.disabled = false;
+  }
+}
+$('#pd-export-excel').addEventListener('click', exportProjectToExcel);
 
 /* ---------------- PROJECT FORM SHEET ---------------- */
 let editingProjectId = null;
