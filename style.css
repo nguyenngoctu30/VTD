@@ -375,10 +375,16 @@ input, select, textarea { font-family: inherit; }
 }
 .toast.is-active { opacity: 1; transform: translate(-50%, 0); }
 
-/* ============ RESPONSIVE (desktop) ============ */
 @media (min-width: 760px) {
-  .screen { padding: 24px 24px 40px; }
-  .bottom-nav { max-width: 720px; left: 50%; transform: translateX(-50%); border-radius: 20px 20px 0 0; border-left: 1px solid var(--color-border); border-right: 1px solid var(--color-border); }
+  .screen { padding: 24px 24px 90px; }   /* giữ 90px thay vì 40px */
+  .bottom-nav {
+    max-width: 720px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-radius: 20px 20px 0 0;
+    border-left: 1px solid var(--color-border);
+    border-right: 1px solid var(--color-border);
+  }
   .topbar { max-width: 720px; margin: 0 auto; }
 }
 
