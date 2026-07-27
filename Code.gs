@@ -10,6 +10,8 @@
  *      - Execute as: Me
  *      - Who has access: Anyone (hoặc "Anyone within [tổ chức]")
  * 5. Copy URL "Web app" -> dán vào app.js (biến API_URL)
+ * 6. Chạy hàm "setupSpreadsheet" MỘT LẦN (Apps Script editor -> chọn hàm -> Run)
+ *    để tự tạo/bổ sung các sheet cần thiết, bao gồm sheet "Attachments" mới.
  * ============================================================
  */
 
@@ -23,12 +25,13 @@ const SHEETS = {
   TRANSACTIONS: 'Transactions',
   AUDIT: 'AuditLog',
   USERS: 'Users',
-  BACKUP: 'Backup'
+  BACKUP: 'Backup',
+  ATTACHMENTS: 'Attachments'
 };
 
 // Đổi chuỗi này mỗi lần bạn deploy để tự kiểm tra xem web đang chạy đúng bản mới nhất chưa:
 // mở .../exec?action=ping trên trình duyệt (GET) -> phải thấy đúng version này.
-const BACKEND_VERSION = 'v4-2026-07-23-group-permission-trash';
+const BACKEND_VERSION = 'v5-2026-07-24-attachments';
 
 // ---------- ENTRY POINTS ----------
 function doGet(e) {
@@ -65,6 +68,9 @@ function handleRequest(e) {
       case 'restoreBackup': result = restoreBackup(params, userEmail); break;
       case 'purgeBackup': result = purgeBackup(params, userEmail); break;
       case 'syncExternalDeletions': result = manualSyncExternalDeletions(userEmail); break;
+      case 'listAttachments': result = listAttachments(params); break;
+      case 'uploadAttachment': result = uploadAttachment(params, userEmail); break;
+      case 'deleteAttachment': result = deleteAttachment(params, userEmail); break;
       case 'ping': result = { ok: true, version: BACKEND_VERSION }; break;
       default: result = { ok: false, error: 'Unknown action: ' + action };
     }
@@ -487,6 +493,60 @@ function uploadImage(p) {
   return { ok: true, url: url, fileId: file.getId() };
 }
 
+// ---------- ATTACHMENTS (hợp đồng, giấy tờ dự án -> Drive) ----------
+/** Lấy danh sách tệp đính kèm của 1 dự án (mới nhất trước). */
+function listAttachments(p) {
+  let items = sheetToObjects(sheet(SHEETS.ATTACHMENTS));
+  if (p.ProjectID) items = items.filter(a => a.ProjectID === p.ProjectID);
+  items.sort((a, b) => new Date(b.UploadedTime) - new Date(a.UploadedTime));
+  return { ok: true, items: items };
+}
+
+/** Nhận file base64 từ trình duyệt, lưu vào Drive (thư mục con riêng cho từng dự án),
+ *  rồi ghi thông tin (tên, link, người tải lên...) vào sheet Attachments.
+ *  Bất kỳ người dùng đã đăng nhập nào cũng tải lên được — không giới hạn quyền edit/delete. */
+function uploadAttachment(p, userEmail) {
+  const root = DriveApp.getFolderById(DRIVE_FOLDER_ID);
+  const folderName = 'DinhKem_' + p.ProjectID;
+  let folders = root.getFoldersByName(folderName);
+  const folder = folders.hasNext() ? folders.next() : root.createFolder(folderName);
+
+  const bytes = Utilities.base64Decode(p.base64Data);
+  const blob = Utilities.newBlob(bytes, p.mimeType || 'application/octet-stream', p.fileName || ('file_' + Date.now()));
+  const file = folder.createFile(blob);
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+  const obj = {
+    AttachmentID: newId('ATT'),
+    ProjectID: p.ProjectID,
+    FileName: p.fileName || file.getName(),
+    MimeType: p.mimeType || '',
+    DriveFileID: file.getId(),
+    DriveURL: file.getUrl(),
+    UploadedBy: userEmail,
+    UploadedTime: new Date()
+  };
+  appendRowFromObject(sheet(SHEETS.ATTACHMENTS), obj);
+  logAudit(userEmail, 'CREATE', SHEETS.ATTACHMENTS, obj.AttachmentID, null, obj);
+  return { ok: true, attachment: obj };
+}
+
+/** Xóa 1 tệp đính kèm — dùng đúng quy tắc phân quyền 'delete_all' như Project/Transaction:
+ *  Admin, hoặc chính người đã tải file lên, hoặc người được ủy quyền delete_all mới xóa được. */
+function deleteAttachment(p, userEmail) {
+  const sh = sheet(SHEETS.ATTACHMENTS);
+  const rowIdx = findRowIndexById(sh, 'AttachmentID', p.AttachmentID);
+  if (rowIdx === -1) return { ok: false, error: 'Không tìm thấy tệp đính kèm' };
+  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const row = sh.getRange(rowIdx, 1, 1, headers.length).getValues()[0];
+  const obj = {}; headers.forEach((h, i) => obj[h] = row[i]);
+  assertCanModify(userEmail, obj.UploadedBy, 'delete_all');
+  try { DriveApp.getFileById(obj.DriveFileID).setTrashed(true); } catch (e) {}
+  sh.deleteRow(rowIdx);
+  logAudit(userEmail, 'DELETE', SHEETS.ATTACHMENTS, p.AttachmentID, obj, null);
+  return { ok: true };
+}
+
 /**
  * Hàm chạy 1 lần để tự tạo cấu trúc Sheet (headers) nếu Sheet trống.
  * Vào Apps Script -> chọn hàm "setupSpreadsheet" -> Run.
@@ -501,6 +561,8 @@ function setupSpreadsheet() {
     Users: ['Email', 'Name', 'Avatar', 'Role', 'Permissions'],
     // Backup: lưu bản sao đầy đủ của mọi bản ghi đã xóa để có thể khôi phục khi lỡ xóa nhầm
     Backup: ['BackupID', 'Table', 'RecordID', 'RecordData', 'DeletedBy', 'DeletedTime', 'Restored', 'RestoredBy', 'RestoredTime'],
+    // Attachments: hợp đồng, giấy tờ đính kèm cho từng dự án — file thật lưu trên Drive, đây chỉ lưu link
+    Attachments: ['AttachmentID', 'ProjectID', 'FileName', 'MimeType', 'DriveFileID', 'DriveURL', 'UploadedBy', 'UploadedTime'],
     // Sheet mirror nội bộ, dùng để phát hiện khi có dòng bị xóa TRỰC TIẾP trong Google Sheet (không qua app)
     _SnapshotProjects: ['ProjectID', 'ProjectName', 'Customer', 'Address', 'Status', 'CreatedDate', 'CreatedBy'],
     _SnapshotTransactions: ['TransactionID', 'ProjectID', 'Type', 'DateTime', 'ItemName', 'ItemCode', 'Quantity', 'Note', 'ImageURL', 'CreatedBy', 'CreatedTime']
@@ -530,5 +592,5 @@ function setupSpreadsheet() {
   // Tạo trigger tự động quét mỗi 10 phút để phát hiện xóa trực tiếp trong Sheet
   try { ensureSyncTrigger(); } catch (e) { Logger.log('Không tạo được trigger tự động: ' + e.message); }
 
-  Logger.log('Setup xong! (Đã kiểm tra/bổ sung sheet, cột còn thiếu, và bật quét tự động chống xóa nhầm ngoài Sheet)');
+  Logger.log('Setup xong! (Đã kiểm tra/bổ sung sheet, cột còn thiếu — bao gồm sheet Attachments mới, và bật quét tự động chống xóa nhầm ngoài Sheet)');
 }
