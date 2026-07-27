@@ -81,6 +81,7 @@
         <div class="chip-row">
           <button class="chip" id="pd-edit">Sửa dự án</button>
           <button class="chip chip-danger" id="pd-delete">Xóa dự án</button>
+          <button class="chip" id="pd-attachments">📎 Đính kèm</button>
           <button class="chip chip-excel" id="pd-export-excel">⬇ Xuất Excel</button>
         </div>
       </div>
@@ -305,6 +306,25 @@
       <button class="btn btn-outline" data-close-project>Hủy</button>
       <button class="btn btn-primary" id="btn-save-project">Lưu dự án</button>
     </div>
+  </div>
+</div>
+
+<!-- ============ ATTACHMENTS SHEET (hợp đồng, giấy tờ dự án) ============ -->
+<div id="attachment-overlay" class="sheet-overlay">
+  <div class="sheet sheet-tall" id="attachment-sheet">
+    <div class="sheet-handle"></div>
+    <h3>Tệp đính kèm dự án</h3>
+
+    <label class="btn btn-ai btn-block" for="attachment-input" style="cursor:pointer;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+      Thêm tệp (hợp đồng, PDF, ảnh...)
+    </label>
+    <input type="file" id="attachment-input" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" class="is-hidden">
+    <p id="attachment-status" class="ocr-status is-hidden"></p>
+
+    <div id="attachment-list" class="txn-list" style="margin-top:14px;"></div>
+
+    <button class="sheet-cancel" data-close-attachment>Đóng</button>
   </div>
 </div>
 

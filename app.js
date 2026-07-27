@@ -1,6 +1,6 @@
 const CONFIG = {
   // URL Web App sau khi deploy Code.gs (Deploy > New deployment > Web app)
-  API_URL: 'https://script.google.com/macros/s/AKfycbxirdv5D6ZHWmIfKYsjePGivSEookCLEj18lvbQk1T0Ea-23KOaqfckAaiKtnQoej4/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbwsUkvxQKCZIiD0NicC4cE9pF1Sqe3puGn0Dp0yPaU710IEa78Xs_Zo2Ehqt6TNchhy/exec',
 
   // Client ID từ Google Cloud Console > OAuth consent > Credentials
   // (Tạo "OAuth client ID" loại "Web application")
@@ -13,7 +13,6 @@ const CONFIG = {
   GEMINI_MODEL: 'gemini-2.0-flash',
   CONFIRM_PASSWORD: 'vtd123'
 };
-
 
 const LOCAL_USER_KEY = 'dientrack_vtd_user';
 
@@ -47,7 +46,8 @@ const demoStore = {
     { TransactionID: 'TXN_demo3', ProjectID: 'PRJ_demo2', Type: 'Xuất', DateTime: new Date(Date.now() - 3600000), ItemName: 'Dây điện CADIVI 2.5mm', ItemCode: 'DC-2.5', Quantity: 20, Note: '', ImageURL: '', CreatedBy: 'demo@vtdsmarthome.vn', CreatedTime: new Date() }
   ],
   users: [{ Email: 'demo@vtdsmarthome.vn', Name: 'Người dùng Demo', Avatar: '', Role: 'Admin', Permissions: '' }],
-  backups: []
+  backups: [],
+  attachments: []
 };
 
 /* ---------------- API WRAPPER ---------------- */
@@ -169,6 +169,20 @@ function demoApi(action, p) {
     }
     case 'uploadImage':
       return { ok: true, url: p._localPreviewUrl || '' };
+    case 'listAttachments':
+      return { ok: true, items: clone(demoStore.attachments.filter(a => a.ProjectID === p.ProjectID)) };
+    case 'uploadAttachment': {
+      const obj = { AttachmentID: 'ATT_' + Date.now(), ProjectID: p.ProjectID, FileName: p.fileName, MimeType: p.mimeType, DriveFileID: '', DriveURL: p._localPreviewUrl || '#', UploadedBy: state.user.Email, UploadedTime: new Date() };
+      demoStore.attachments.unshift(obj);
+      return { ok: true, attachment: obj };
+    }
+    case 'deleteAttachment': {
+      const it = demoStore.attachments.find(x => x.AttachmentID === p.AttachmentID);
+      if (!it) return { ok: false, error: 'Không tìm thấy tệp đính kèm' };
+      if (!canModify(it.UploadedBy, 'delete_all')) return { ok: false, error: 'Bạn không có quyền xóa tệp này' };
+      demoStore.attachments = demoStore.attachments.filter(x => x.AttachmentID !== p.AttachmentID);
+      return { ok: true };
+    }
     default:
       return { ok: false, error: 'Demo mode: hành động không hỗ trợ' };
   }
@@ -1096,6 +1110,94 @@ async function loadTrash() {
     });
   });
 }
+
+/* ---------------- ATTACHMENTS (hợp đồng, giấy tờ dự án) ---------------- */
+$('#pd-attachments').addEventListener('click', () => {
+  $('#attachment-overlay').classList.add('is-active');
+  loadAttachments();
+});
+$('[data-close-attachment]').addEventListener('click', () => $('#attachment-overlay').classList.remove('is-active'));
+$('#attachment-overlay').addEventListener('click', (e) => { if (e.target.id === 'attachment-overlay') $('#attachment-overlay').classList.remove('is-active'); });
+
+async function loadAttachments() {
+  if (!state.currentProject) return;
+  const container = $('#attachment-list');
+  container.innerHTML = '<div class="empty-state">Đang tải...</div>';
+  const res = await api('listAttachments', { ProjectID: state.currentProject.ProjectID });
+  if (!res.ok) { container.innerHTML = `<div class="empty-state">${escapeHtml(res.error)}</div>`; return; }
+  renderAttachments(container, res.items || []);
+}
+
+function fileIconSvg() {
+  return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M14 3v5h5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
+}
+
+function renderAttachments(container, items) {
+  container.innerHTML = '';
+  if (!items.length) { container.innerHTML = '<div class="empty-state">Chưa có tệp đính kèm nào.</div>'; return; }
+  items.forEach(a => {
+    const el = document.createElement('div');
+    el.className = 'txn-card';
+    const canDelete = hasPerm(a.UploadedBy, 'delete_all');
+    el.innerHTML = `
+      <span class="txn-icon" style="background:var(--color-primary-light); color:var(--color-primary);">${fileIconSvg()}</span>
+      <div class="txn-body">
+        <strong>${escapeHtml(a.FileName)}</strong>
+        <div class="txn-meta">
+          <span>${fmtDate(a.UploadedTime)}</span>
+          <span>${escapeHtml((a.UploadedBy || '').split('@')[0])}</span>
+        </div>
+      </div>
+      ${canDelete ? '<button class="icon-btn att-delete-btn" aria-label="Xóa" style="color:var(--color-danger);">✕</button>' : ''}
+    `;
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.att-delete-btn')) return;
+      window.open(a.DriveURL, '_blank');
+    });
+    if (canDelete) {
+      el.querySelector('.att-delete-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        requirePasswordThen('Xác nhận xóa tệp', 'Nhập mật khẩu để xóa "' + a.FileName + '".', async () => {
+          const res = await api('deleteAttachment', { AttachmentID: a.AttachmentID });
+          if (!res.ok) { toast('Lỗi: ' + res.error); return; }
+          toast('Đã xóa tệp đính kèm');
+          loadAttachments();
+        });
+      });
+    }
+    container.appendChild(el);
+  });
+}
+
+$('#attachment-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (file.size > 15 * 1024 * 1024) { toast('File quá lớn (giới hạn 15MB)'); e.target.value = ''; return; }
+
+  const status = $('#attachment-status');
+  status.classList.remove('is-hidden');
+  status.textContent = 'Đang tải lên...';
+
+  try {
+    const base64 = await fileToBase64(file);
+    const res = await api('uploadAttachment', {
+      ProjectID: state.currentProject.ProjectID,
+      fileName: file.name,
+      mimeType: file.type,
+      base64Data: base64,
+      _localPreviewUrl: 'data:' + file.type + ';base64,' + base64
+    });
+    status.classList.add('is-hidden');
+    if (!res.ok) { toast('Lỗi: ' + res.error); return; }
+    toast('✓ Đã thêm tệp đính kèm');
+    loadAttachments();
+  } catch (err) {
+    status.classList.add('is-hidden');
+    toast('Lỗi tải lên: ' + err.message);
+  } finally {
+    e.target.value = '';
+  }
+});
 
 /* ---------------- IMAGE VIEWER ---------------- */
 function openImageViewer(url) {
