@@ -1,6 +1,6 @@
 const CONFIG = {
   // URL Web App sau khi deploy Code.gs (Deploy > New deployment > Web app)
-  API_URL: 'https://script.google.com/macros/s/AKfycbwsUkvxQKCZIiD0NicC4cE9pF1Sqe3puGn0Dp0yPaU710IEa78Xs_Zo2Ehqt6TNchhy/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbylWh2oG53N4BQjJ29_JxH1P3kJOEh3kj45T4M34aOW3zO8JZV0OcClgt5HkMW84Ng/exec',
 
   // Client ID từ Google Cloud Console > OAuth consent > Credentials
   // (Tạo "OAuth client ID" loại "Web application")
