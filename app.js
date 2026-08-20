@@ -23,7 +23,7 @@ const state = {
   currentProject: null,
   screenStack: ['dashboard'],
   pdPage: 1,
-  pdPageSize: 20,
+  pdPageSize: 10000,
   pdTotal: 0,
   pendingTxnType: null,
   editingTxnId: null,
