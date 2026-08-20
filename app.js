@@ -38,7 +38,7 @@ const DEMO_MODE = CONFIG.API_URL.indexOf('DÁN_URL') === 0;
 const demoStore = {
   projects: [
     { ProjectID: 'PRJ_demo1', ProjectName: 'Nhà anh Tuấn - Q7', Customer: 'Anh Tuấn', Address: '12 Nguyễn Lương Bằng, Q7', Status: 'Đang thi công', CreatedDate: new Date(), CreatedBy: 'demo@vtdsmarthome.vn' },
-    { ProjectID: 'PRJ_demo2', ProjectName: 'Villa Thảo Điền', Customer: 'Chị Hoa', Address: '45 Quốc Hương, TP.Thủ Đức', Status: 'Đang thi công', CreatedDate: new Date(), CreatedBy: 'demo@vtdsmarthome.vn' }
+    { ProjectID: 'PRJ_demo2', ProjectName: 'Villa Thảo Điền', Customer: 'Chị Hoa', Address: '45 Quốc Hương, TP.Thủ Đức', Status: 'Đang thi công', CreatedBy: 'demo@vtdsmarthome.vn' }
   ],
   transactions: [
     { TransactionID: 'TXN_demo1', ProjectID: 'PRJ_demo1', Type: 'Xuất', DateTime: new Date(), ItemName: 'Dây điện CADIVI 2.5mm', ItemCode: 'DC-2.5', Quantity: 50, Note: 'Xuất cho tầng 2', ImageURL: '', CreatedBy: 'demo@vtdsmarthome.vn', CreatedTime: new Date() },
@@ -222,6 +222,25 @@ function fileToBase64(file) {
 
 function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function escapeAttr(s) { return escapeHtml(s); }
+
+/** Chuẩn hoá chuỗi dùng làm KHÓA GỘP NHÓM (ItemCode/ItemName) — quan trọng để
+ *  tránh 2 giao dịch cùng mã hàng nhưng bị tách thành 2 nhóm riêng chỉ vì khác
+ *  nhau ở khoảng trắng thừa (kể cả ở giữa chuỗi), ký tự unicode full-width,
+ *  hoặc chữ hoa/thường — hay gặp khi 1 giao dịch nhập tay và 1 giao dịch do
+ *  tính năng OCR (AI đọc ảnh) tự động điền vào. */
+function normalizeKey(s) {
+  return String(s || '')
+    .normalize('NFKC')     // gộp các biến thể unicode (VD số/chữ full-width) về dạng chuẩn
+    .replace(/\s+/g, ' ')  // gộp mọi khoảng trắng liên tiếp (kể cả ở giữa chuỗi) thành 1 dấu cách
+    .trim()
+    .toLowerCase();
+}
+
+/** Chuẩn hoá giá trị hiển thị/lưu trữ cho ItemCode, ItemName trước khi gửi lên server,
+ *  để hạn chế dữ liệu "bẩn" (khoảng trắng thừa ở giữa, đầu/cuối) lọt vào Sheet ngay từ đầu. */
+function cleanFieldValue(s) {
+  return String(s || '').normalize('NFKC').replace(/\s+/g, ' ').trim();
+}
 
 function projectNameById(id) {
   const p = state.projects.find(x => x.ProjectID === id);
@@ -841,8 +860,10 @@ $('#btn-save-txn').addEventListener('click', () => {
     const payload = {
       ProjectID: $('#txn-project').value,
       Type: state.pendingTxnType,
-      ItemName: itemName,
-      ItemCode: $('#txn-itemcode').value.trim(),
+      ItemName: cleanFieldValue(itemName),
+      // Chuẩn hoá ItemCode ngay khi lưu để tránh khoảng trắng/ký tự thừa lọt vào Sheet,
+      // giúp việc gộp nhóm theo mã hàng ở màn Chi tiết dự án/Tìm kiếm luôn chính xác.
+      ItemCode: cleanFieldValue($('#txn-itemcode').value),
       Quantity: qty,
       Note: $('#txn-note').value.trim(),
       ImageURL: imageUrl
@@ -910,8 +931,11 @@ $('#ocr-input').addEventListener('change', async (e) => {
     const cleaned = text.replace(/```json|```/g, '').trim();
     const parsed = JSON.parse(cleaned);
 
-    if (parsed.ItemName) $('#txn-itemname').value = parsed.ItemName;
-    if (parsed.ItemCode) $('#txn-itemcode').value = parsed.ItemCode;
+    // Chuẩn hoá kết quả AI trả về trước khi điền vào form, vì OCR hay sinh ra
+    // khoảng trắng thừa / ký tự unicode full-width khiến mã hàng trông "giống hệt"
+    // bằng mắt nhưng khác chuỗi thực tế -> gộp nhóm sai như đã gặp phải.
+    if (parsed.ItemName) $('#txn-itemname').value = cleanFieldValue(parsed.ItemName);
+    if (parsed.ItemCode) $('#txn-itemcode').value = cleanFieldValue(parsed.ItemCode);
     if (parsed.Quantity) $('#txn-qty').value = parsed.Quantity;
 
     statusEl.textContent = '✓ AI đã điền sẵn — vui lòng kiểm tra lại trước khi lưu';
@@ -941,7 +965,7 @@ function renderSearchGroups(container, items) {
   // Gộp theo mã hàng (hoặc tên hàng nếu không có mã), rồi theo từng dự án
   const groups = new Map();
   items.forEach(t => {
-    const key = (t.ItemCode && String(t.ItemCode).trim()) ? String(t.ItemCode).trim().toLowerCase() : String(t.ItemName).trim().toLowerCase();
+    const key = normalizeKey(t.ItemCode) || normalizeKey(t.ItemName);
     if (!groups.has(key)) groups.set(key, { itemName: t.ItemName, itemCode: t.ItemCode, byProject: new Map() });
     const g = groups.get(key);
     if (!g.byProject.has(t.ProjectID)) g.byProject.set(t.ProjectID, { xuat: 0, thuhoi: 0 });
@@ -1127,13 +1151,7 @@ async function loadAttachments() {
   if (!res.ok) { container.innerHTML = `<div class="empty-state">${escapeHtml(res.error)}</div>`; return; }
   renderAttachments(container, res.items || []);
 }
-function normalizeKey(s) {
-  return String(s || '')
-    .normalize('NFKC')      // gộp ký tự full-width/unicode lạ về dạng chuẩn
-    .replace(/\s+/g, ' ')   // gộp mọi khoảng trắng liên tiếp (kể cả giữa chuỗi) thành 1
-    .trim()
-    .toLowerCase();
-}
+
 function fileIconSvg() {
   return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M14 3v5h5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
 }
