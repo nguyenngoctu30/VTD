@@ -484,7 +484,7 @@ function renderProjectDetailGrouped(container, items) {
   const groups = new Map();
   const order = [];
   items.forEach(t => {
-    const key = (t.ItemCode && String(t.ItemCode).trim()) ? String(t.ItemCode).trim().toLowerCase() : String(t.ItemName).trim().toLowerCase();
+    const key = normalizeKey(t.ItemCode) || normalizeKey(t.ItemName);
     if (!groups.has(key)) { groups.set(key, { itemName: t.ItemName, itemCode: t.ItemCode, xuat: 0, thuhoi: 0, txns: [] }); order.push(key); }
     const g = groups.get(key);
     const qty = Number(t.Quantity) || 0;
@@ -1127,7 +1127,13 @@ async function loadAttachments() {
   if (!res.ok) { container.innerHTML = `<div class="empty-state">${escapeHtml(res.error)}</div>`; return; }
   renderAttachments(container, res.items || []);
 }
-
+function normalizeKey(s) {
+  return String(s || '')
+    .normalize('NFKC')      // gộp ký tự full-width/unicode lạ về dạng chuẩn
+    .replace(/\s+/g, ' ')   // gộp mọi khoảng trắng liên tiếp (kể cả giữa chuỗi) thành 1
+    .trim()
+    .toLowerCase();
+}
 function fileIconSvg() {
   return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M14 3v5h5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
 }
